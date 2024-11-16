@@ -7,6 +7,10 @@ longer be needed once development is convenient enough within the
 window manager itself! Temporarily, you'll need to inspect the source
 code if you're looking for the key bindings...
 
+- [ ] Implement a simple tiling layout policy
+- [ ] Support multiple numbered workspaces, just like dwm
+- [ ] Somehow make it stand out! Add something original
+ 
 # Learning X11
 
 ## Resources
