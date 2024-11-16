@@ -12,7 +12,7 @@
 #define SHELL_CMD(cmd) { "/bin/sh", "-c", cmd, NULL }
 
 static const char* wm_app_launcher[] = { "dmenu_run", NULL };
-static const char* wm_terminal_cmd[] = { "alacritty", NULL };
+static const char* wm_terminal_cmd[] = { "xterm", NULL };
 
 typedef struct
 {

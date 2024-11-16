@@ -1,3 +1,12 @@
+# Usage
+
+We'll need to install `dmenu` (a lightweight graphical application
+launcher), as well as `Xephyr` (a tool for interacting with
+alternative X servers using ordinary, local windows). `Xephyr` will no
+longer be needed once development is convenient enough within the
+window manager itself! Temporarily, you'll need to inspect the source
+code if you're looking for the key bindings...
+
 # Learning X11
 
 ## Resources
