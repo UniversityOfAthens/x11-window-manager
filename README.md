@@ -60,11 +60,28 @@ argument to discard all server events that are currently waiting to be
 processed by the client. Every client will allocate space for an event
 queue for each server that it is currently connected to.
 
-The servers manages a set of **resources**, which it then exposes
+The server manages a set of **resources**, which it then exposes
 using simple integer IDs. If any client knows the ID of a resource,
 they can freely manipulate it even if some other client had initially
 created it. This is how window managers are implemented: they can move
 and resize applications because they know their IDs.
+
+A window manager is just like any other client, but with an elevated
+set of privileges! Unlike ordinary applications, it is mostly
+responsible of intercepting events sent from other clients in an
+effort of applying its layout policy. For example, a tiling window
+manager will usually ignore all client move and resize events: window
+positioning is heavily regulated and can only be modified by a set of
+special key bindings. Although this might initially seem annoying, it
+makes total sense in practice since you won't have to deal with
+overlapping windows ever again!
+
+A window manager is also responsible of defining the desktop's
+appearance. Some window managers, such as i3, will ship with
+decorative title bars by default. Others, such as dwm, prefer to
+minimize visual clutter, restricting themselves to just a single
+optional status bar at the top. Most of them are impressively
+configurable.
 
 The developers of X needed a way to allow **clients to communicate
 arbitrary data with each other**, and they came up with properties. A
