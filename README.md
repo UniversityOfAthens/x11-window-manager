@@ -7,7 +7,7 @@
   absolute basics.
 
 - [aewmx](https://github.com/joshuaeckroth/aewmx/) is a window manager
-  from the 90's. The author put great effort into documenting most of
+  from the 90s. The author put great effort into documenting most of
   its functionality.
 
 ## Basic Concepts

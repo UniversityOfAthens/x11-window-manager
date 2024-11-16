@@ -334,16 +334,16 @@ static void wm_loop(void)
 
 static void setup(void)
 {
-	struct sigaction sa;
+    struct sigaction sa;
 
     // Prevent the creation of child zombie processes
     // This is important because we're going to spawn launchers and terminals
     //  using window manager key bindings, and we certainly don't want to wait() on them
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT | SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT | SA_RESTART;
     // SIG_IGN = ignore. Don't execute any code, just apply the flag side-effects
-	sa.sa_handler = SIG_IGN;
-	sigaction(SIGCHLD, &sa, NULL);
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGCHLD, &sa, NULL);
 
     // Connect to an X server
     // Use the $DISPLAY environment variable as a default
