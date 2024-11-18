@@ -1,6 +1,8 @@
 #ifndef _WM_CONFIG_H
 #define _WM_CONFIG_H
 
+#include "window_manager.h"
+
 // Using the super (windows) key as a binding prefix
 #define WM_MOD_MASK Mod4Mask
 
@@ -14,12 +16,12 @@
 static const char* wm_app_launcher[] = { "dmenu_run", NULL };
 static const char* wm_terminal_cmd[] = { "xterm", NULL };
 
-typedef struct
-{
-    unsigned int modifiers;
-    KeySym keysym;
-} wm_key_t;
+static wm_key_t wm_kill_client_key = { WM_MOD_MASK | ShiftMask, XK_q };
 
-static wm_key_t wm_kill_client = { WM_MOD_MASK | ShiftMask, XK_q };
+static wm_binding_t wm_bindings[] = {
+    { {WM_MOD_MASK,             XK_p}, wm_spawn, wm_app_launcher },
+    { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, wm_terminal_cmd },
+    { {WM_MOD_MASK | ShiftMask, XK_e}, wm_quit, NULL },
+};
 
 #endif

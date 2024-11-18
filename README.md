@@ -4,8 +4,12 @@ We'll need to install `dmenu` (a lightweight graphical application
 launcher), as well as `Xephyr` (a tool for interacting with
 alternative X servers using ordinary, local windows). `Xephyr` will no
 longer be needed once development is convenient enough within the
-window manager itself! Temporarily, you'll need to inspect the source
-code if you're looking for the key bindings...
+window manager itself! Within `Xephyr`, press `Ctlr + Shift` to
+prevent the host X window manager from listening to your key strokes
+and causing conflicts.
+
+Similarly to `dwm`, the window manager is customizable through global
+variables and symbolic constants defined in `config.h`.
 
 # Learning X11
 
