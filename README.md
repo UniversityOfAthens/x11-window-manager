@@ -11,6 +11,10 @@ and causing conflicts.
 Similarly to `dwm`, the window manager is customizable through global
 variables and symbolic constants defined in `config.h`.
 
+- [ ] Implement a simple tiling layout policy
+- [ ] Support multiple numbered workspaces, just like dwm
+- [ ] Somehow make it stand out! Add something original
+ 
 # Learning X11
 
 ## Resources
