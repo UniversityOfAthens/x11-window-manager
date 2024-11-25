@@ -15,7 +15,11 @@ variables and symbolic constants defined in `config.h`.
 - [ ] Change frame border color on highlighted windows
 - [ ] Support 9 numbered workspaces, just like dwm 
 - [ ] Somehow make it stand out! Add something original
- 
+
+<p align="center">
+ <img alt="a screenshot of the window manager in action" src="./screenshots/early.png" width="500" />
+</p>
+
 # Learning X11
 
 ## Resources
