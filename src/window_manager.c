@@ -128,9 +128,9 @@ static void focus_client(wm_t *wm, client_t *c)
 {
     if (!c)
     {
-		XSetInputFocus(wm->conn, wm->root, RevertToPointerRoot, CurrentTime);
+        XSetInputFocus(wm->conn, wm->root, RevertToPointerRoot, CurrentTime);
         // Clear the property so that clients understand that no window is currently in focus
-		XDeleteProperty(wm->conn, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW]);
+        XDeleteProperty(wm->conn, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW]);
         wm->focused_client = NULL;
     }
     else
