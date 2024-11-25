@@ -11,6 +11,8 @@ typedef enum
 {
     ATOM_WM_PROTOCOLS,
     ATOM_WM_DELETE_WINDOW,
+    ATOM_WM_TAKE_FOCUS,
+    ATOM_NET_ACTIVE_WINDOW,
     TOTAL_ATOMS,
 } wm_atom_e;
 
@@ -19,9 +21,17 @@ typedef struct
     Display *conn;
     client_list_t clients;
 
+    // Dimensions of the entire monitor in pixels
+    int width, height;
+    // The width of the special window, initially set to half the screen width
+    int special_width;
+
+    client_t *focused_client;
+
     Atom atoms[TOTAL_ATOMS];
     // We're only dealing with simple, single-monitor setups (as of now)
     Window root;
+    bool has_moved_cursor;
     bool is_running;
 } wm_t;
 
@@ -37,6 +47,7 @@ void wm_cleanup(wm_t *wm);
 typedef union
 {
     const char **str_array;
+    int amount;
 } wm_arg_t;
 
 typedef struct
@@ -61,5 +72,12 @@ typedef struct
  */
 void wm_spawn(wm_t *wm, const wm_arg_t arg);
 void wm_quit(wm_t *wm, const wm_arg_t arg);
+
+// The argument represents dx, min and max bound checking will be applied
+void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg);
+
+void wm_focus_on_next(wm_t *wm, const wm_arg_t arg);
+void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg);
+void wm_make_focused_special(wm_t *wm, const wm_arg_t arg);
 
 #endif

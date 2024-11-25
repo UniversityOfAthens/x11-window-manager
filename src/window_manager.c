@@ -3,6 +3,7 @@
 #include "clients.h"
 #include "config.h"
 #include <X11/XKBlib.h>
+#include <X11/Xatom.h>
 #include <X11/cursorfont.h>
 
 #include <signal.h>
@@ -74,54 +75,6 @@ static void create_bindings(wm_t *wm)
     }
 }
 
-void wm_setup(wm_t *wm)
-{
-    struct sigaction sa;
-
-    // Prevent the creation of child zombie processes
-    // This is important because we're going to spawn launchers and terminals
-    //  using window manager key bindings, and we certainly don't want to wait() on them
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT | SA_RESTART;
-    // SIG_IGN = ignore. Don't execute any code, just apply the flag side-effects
-    sa.sa_handler = SIG_IGN;
-    sigaction(SIGCHLD, &sa, NULL);
-
-    // Connect to an X server
-    // Use the $DISPLAY environment variable as a default
-    wm->conn = XOpenDisplay(NULL);
-    if (!wm->conn)
-        log_fatal("failed to connect to X server: %s", XDisplayName(NULL));
-
-    // An initial root window will always be present
-    wm->root = DefaultRootWindow(wm->conn);
-    wm->clients = NULL;
-    wm->is_running = true;
-
-    /*
-     * Checking whether we've got a right for Substructure Redirection
-     * Using a temporary error handler for this special initialization phase
-     */
-    XSetErrorHandler(on_wm_error);
-    // For substructure redirection, check out page 361 of the programming manual!
-    XSelectInput(wm->conn, wm->root, SubstructureRedirectMask | SubstructureNotifyMask);
-    // Wait until all pending requests have been fully processed by the X server.
-    // the second argument must always be false, since we don't want to discard incoming queue events
-    XSync(wm->conn, false);
-
-    XSetErrorHandler(on_x_error);
-
-    // Setting the cursor for our root window. The default is a big X
-    Cursor cursor = XCreateFontCursor(wm->conn, XC_left_ptr);
-    XDefineCursor(wm->conn, wm->root, cursor);
-
-    wm->atoms[ATOM_WM_PROTOCOLS] = XInternAtom(wm->conn, "WM_PROTOCOLS", false);
-    wm->atoms[ATOM_WM_DELETE_WINDOW] = XInternAtom(wm->conn, "WM_DELETE_WINDOW", false);
-    create_bindings(wm);
-
-    puts("WM was initialized successfully");
-}
-
 // Will return false if the client does not participate in the protocol (x_notes.md)
 static bool try_send_wm_protocol(wm_t *wm, Window window, Atom protocol)
 {
@@ -163,6 +116,135 @@ static bool try_send_wm_protocol(wm_t *wm, Window window, Atom protocol)
     return is_supported;
 }
 
+static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
+                            unsigned long *values, unsigned long total)
+{
+    // Set the property, overriding the previous value if set
+    XChangeProperty(wm->conn, w, a, type, 32, PropModeReplace, (unsigned char*) values, total);
+}
+
+// Call with NULL to clear focus
+static void focus_client(wm_t *wm, client_t *c)
+{
+    if (!c)
+    {
+		XSetInputFocus(wm->conn, wm->root, RevertToPointerRoot, CurrentTime);
+        // Clear the property so that clients understand that no window is currently in focus
+		XDeleteProperty(wm->conn, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW]);
+        wm->focused_client = NULL;
+    }
+    else
+    {
+        set_window_prop(wm, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW], XA_WINDOW, &c->window, 1);
+        // The server will generate FocusIn and FocusOut events
+        XSetInputFocus(wm->conn, c->window, RevertToPointerRoot, CurrentTime);
+        try_send_wm_protocol(wm, c->window, wm->atoms[ATOM_WM_TAKE_FOCUS]);
+        wm->focused_client = c;
+    }
+}
+
+void wm_setup(wm_t *wm)
+{
+    struct sigaction sa;
+
+    // Prevent the creation of child zombie processes
+    // This is important because we're going to spawn launchers and terminals
+    //  using window manager key bindings, and we certainly don't want to wait() on them
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT | SA_RESTART;
+    // SIG_IGN = ignore. Don't execute any code, just apply the flag side-effects
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGCHLD, &sa, NULL);
+
+    // Connect to an X server
+    // Use the $DISPLAY environment variable as a default
+    wm->conn = XOpenDisplay(NULL);
+    if (!wm->conn)
+        log_fatal("failed to connect to X server: %s", XDisplayName(NULL));
+
+    // An initial root window will always be present
+    wm->root = DefaultRootWindow(wm->conn);
+    wm->clients.data = NULL;
+    wm->focused_client = NULL;
+    wm->clients.length = 0;
+    wm->is_running = true;
+
+    /*
+     * Checking whether we've got a right for Substructure Redirection
+     * Using a temporary error handler for this special initialization phase
+     */
+    XSetErrorHandler(on_wm_error);
+    // For substructure redirection, check out page 361 of the programming manual!
+    XSelectInput(wm->conn, wm->root, PointerMotionMask | SubstructureRedirectMask | SubstructureNotifyMask);
+    // Wait until all pending requests have been fully processed by the X server.
+    // the second argument must always be false, since we don't want to discard incoming queue events
+    XSync(wm->conn, false);
+
+    XSetErrorHandler(on_x_error);
+
+    // Setting the cursor for our root window. The default is a big X
+    Cursor cursor = XCreateFontCursor(wm->conn, XC_left_ptr);
+    XDefineCursor(wm->conn, wm->root, cursor);
+
+    wm->atoms[ATOM_WM_PROTOCOLS] = XInternAtom(wm->conn, "WM_PROTOCOLS", false);
+    wm->atoms[ATOM_WM_DELETE_WINDOW] = XInternAtom(wm->conn, "WM_DELETE_WINDOW", false);
+    wm->atoms[ATOM_NET_ACTIVE_WINDOW] = XInternAtom(wm->conn, "_NET_ACTIVE_WINDOW", false);
+    create_bindings(wm);
+
+    int screen = DefaultScreen(wm->conn);
+    wm->width = DisplayWidth(wm->conn, screen);
+    wm->height = DisplayHeight(wm->conn, screen);
+    wm->special_width = wm->width / 2;
+
+    puts("WM was initialized successfully");
+}
+
+static void move_and_resize_client(wm_t *wm, client_t *c, int x, int y, int w, int h)
+{
+    XMoveResizeWindow(wm->conn, c->frame, x, y, w, h);
+    // The x-y position is relative to that of the parent
+    XMoveResizeWindow(wm->conn, c->window, 0, 0, w, h);
+}
+
+/*
+ * Re-calculate all tiling positions in a single monitor
+ * This should generally be called after ground-breaking layout changes
+ */
+static void tile(wm_t *wm)
+{
+    // Setting to false to prevent EnterNotify events from firing because of
+    // the cursor now being above a brand new window.
+    wm->has_moved_cursor = false;
+
+    if (wm->clients.length == 0) return;
+
+    int max_width = wm->width - 2 * WM_BORDER_WIDTH;
+    int max_height = wm->height - 2 * WM_BORDER_WIDTH;
+
+    if (wm->clients.length == 1)
+    {
+        move_and_resize_client(wm, wm->clients.data, 0, 0, max_width, max_height);
+    }
+    else
+    {
+        // The head of the clients list, also known as the special window,
+        // will capture a whole pane on its own.
+        move_and_resize_client(wm, wm->clients.data, 0, 0, wm->special_width, max_height);
+        int remaining_width = max_width - wm->special_width;
+
+        // The other windows will just share the remaining space
+        int other_height = max_height / (wm->clients.length - 1);
+        int i = 0;
+
+        for (client_t *c = wm->clients.data->next; c; c = c->next, i++)
+        {
+            move_and_resize_client(wm, c,
+                    wm->special_width, i * other_height,
+                    remaining_width, other_height);
+        }
+    }
+}
+
 static void frame_window(wm_t *wm, Window window)
 {
     // Fetch the window's attributes so that we can create a matching frame with a border
@@ -180,7 +262,7 @@ static void frame_window(wm_t *wm, Window window)
      * so that they're collected by the root which has enabled substructure
      * redirection. (at least that's my interpretation!)
      */
-    XSelectInput(wm->conn, frame, SubstructureNotifyMask);
+    XSelectInput(wm->conn, frame, SubstructureNotifyMask | EnterWindowMask);
 
     // Stores the list of all client windows managed by the window manager
     // This information is important, particularly during window-manager cleanup
@@ -192,7 +274,8 @@ static void frame_window(wm_t *wm, Window window)
     XMapWindow(wm->conn, frame);
 
     // The change should be reflected to our internal state
-    clients_insert(&wm->clients, create_client(frame, window));
+    client_t *client = create_client(frame, window);
+    clients_insert(&wm->clients, client);
 
     // Register possible bindings
     grab_key(wm, wm_kill_client_key, window);
@@ -215,6 +298,10 @@ static void unframe_client(wm_t *wm, client_t *client)
     XRemoveFromSaveSet(wm->conn, client->window);
     // Destroy frame and delete client entry from state
     XDestroyWindow(wm->conn, client->frame);
+
+    if (wm->focused_client == client)
+        focus_client(wm, client->previous ? client->previous : client->next);
+
     clients_destroy_client(&wm->clients, client);
 
     XSync(wm->conn, false);
@@ -225,7 +312,7 @@ static void unframe_client(wm_t *wm, client_t *client)
 static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
 {
     // First, ensure that the unmapped window is actually a client that we manage
-    client_t *client = clients_find_by_window(wm->clients, event->window);
+    client_t *client = clients_find_by_window(wm->clients, event->window, CLIENT_WINDOW);
 
     if (!client)
         return;
@@ -233,6 +320,7 @@ static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
     // The window is invisible, so get rid of the frame
     // Since minimized windows will not be supported, unmap is pretty much identical to destruction
     unframe_client(wm, client);
+    tile(wm);
 }
 
 static void kill_client(wm_t *wm, Window window)
@@ -269,6 +357,13 @@ static void on_map_request(wm_t *wm, const XMapRequestEvent *event)
 {
     frame_window(wm, event->window);
     XMapWindow(wm->conn, event->window);
+
+    // Wait until the mapping request is done, and only then change focus!
+    // The new window will always be the root of our list
+    XSync(wm->conn, false);
+    focus_client(wm, wm->clients.data);
+
+    tile(wm);
 }
 
 static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
@@ -283,9 +378,25 @@ static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
         .stack_mode = event->detail,
     };
 
-    // Just forward the event. TODO: Enforce the layout policy
-    // Remember: requests, unlike notify's, require some action on our part
+    // TODO: Why does this work? Also, why does this event get called so rarely?
+    // More specifically, why does it only get called when xterm is trying to start?!
     XConfigureWindow(wm->conn, event->window, event->value_mask, &changes);
+}
+
+static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
+{
+    if (!wm->has_moved_cursor) return;
+
+    // Frames are top-level, we should be searching for those
+    client_t *client = clients_find_by_window(wm->clients, event->window, CLIENT_FRAME);
+
+    if (client)
+        focus_client(wm, client);
+}
+
+static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
+{
+    wm->has_moved_cursor = true;
 }
 
 void wm_loop(wm_t *wm)
@@ -307,6 +418,8 @@ void wm_loop(wm_t *wm)
             // Notifications will just inform the WM that a decision has been made
             // We can't recall them, we just react to them
             case UnmapNotify: on_unmap_notify(wm, &event.xunmap); break;
+            case EnterNotify: on_enter_notify(wm, &event.xcrossing); break;
+            case MotionNotify: on_motion_notify(wm, &event.xmotion); break;
         }
     }
 }
@@ -335,3 +448,36 @@ void wm_spawn(wm_t *wm, const wm_arg_t arg)
     }
 }
 
+void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
+{
+    int new_width = wm->special_width + arg.amount;
+    if (new_width < WM_SPECIAL_PADDING || new_width > wm->width - WM_SPECIAL_PADDING) return;
+
+    wm->special_width = new_width;
+    tile(wm);
+}
+
+// This is once again inspired by dwm and vim
+void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
+{
+    if (wm->focused_client && wm->focused_client->next)
+        focus_client(wm, wm->focused_client->next);
+}
+
+void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
+{
+    if (wm->focused_client && wm->focused_client->previous)
+        focus_client(wm, wm->focused_client->previous);
+}
+
+void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
+{
+    if (wm->focused_client && wm->clients.length > 1)
+    {
+        // Remove from list and then insert again as root (special window)
+        clients_remove_client(&wm->clients, wm->focused_client);
+        clients_insert(&wm->clients, wm->focused_client);
+
+        tile(wm);
+    }
+}

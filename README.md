@@ -11,8 +11,9 @@ and causing conflicts.
 Similarly to `dwm`, the window manager is customizable through global
 variables and symbolic constants defined in `config.h`.
 
-- [ ] Implement a simple tiling layout policy
-- [ ] Support multiple numbered workspaces, just like dwm
+- [x] Implement a simple tiling layout policy and focus key bindings
+- [ ] Change frame border color on highlighted windows
+- [ ] Support 9 numbered workspaces, just like dwm 
 - [ ] Somehow make it stand out! Add something original
  
 # Learning X11
@@ -63,10 +64,11 @@ can either adhere to the command or completely ignore it!
 Outgoing Xlib requests are **buffered** and efficiently flushed to
 minimize network delays. When necessary, use `XFlush` or `XSync` to
 perform that manually. Contrary to `XFlush`, `XSync` will wait until
-all requests have been processed by the server. Activate the `discard`
-argument to discard all server events that are currently waiting to be
-processed by the client. Every client will allocate space for an event
-queue for each server that it is currently connected to.
+all requests have been processed by the server. You can (but you most
+likely won't need to) activate the `discard` argument to discard all
+server events that are currently waiting to be processed by the
+client. Every client will allocate space for an event queue for each
+server that it is currently connected to.
 
 The server manages a set of **resources**, which it then exposes
 using simple integer IDs. If any client knows the ID of a resource,
@@ -74,8 +76,8 @@ they can freely manipulate it even if some other client had initially
 created it. This is how window managers are implemented: they can move
 and resize applications because they know their IDs.
 
-A window manager is just like any other client, but with an elevated
-set of privileges! Unlike ordinary applications, it is mostly
+A window manager **is just like any other client**, but with an
+elevated set of privileges! Unlike ordinary applications, it is mostly
 responsible of intercepting events sent from other clients in an
 effort of applying its layout policy. For example, a tiling window
 manager will usually ignore all client move and resize events: window
@@ -84,7 +86,7 @@ special key bindings. Although this might initially seem annoying, it
 makes total sense in practice since you won't have to deal with
 overlapping windows ever again!
 
-A window manager is also responsible of defining the desktop's
+A window manager is also responsible for defining the desktop's
 appearance. Some window managers, such as i3, will ship with
 decorative title bars by default. Others, such as dwm, prefer to
 minimize visual clutter, restricting themselves to just a single
@@ -95,7 +97,7 @@ The developers of X needed a way to allow **clients to communicate
 arbitrary data with each other**, and they came up with properties. A
 property is a packet of information associated with a *window*, made
 available to all clients running under a server. Properties have a
-string name and a corresponding ID called an atom, so as to minimize
+string name and a corresponding ID called an atom, in order to minimize
 message sizes. An application can fetch the atom of a particular
 property by calling `XInternAtom`, supplying the appropriate string
 identifier. Some atoms are predefined and do not require a call: these
@@ -119,14 +121,9 @@ it** to actually get a chance of seeing it!
 `MapRequest` event to our root window whenever any other client
 attempts to create a top-level window. Note that this is a *request*,
 not a *notify*. This means that we're given the privilege of either
-satisfying or totally ignoring it. Only one client (window manager)
-can enable this mask at any given time, so that's why we need to
-abort in case of failure.
-
-`SubstructureNotifyMask` will make events associated with
-modifications of top-level windows accessible to our root window, i.e.
-the second parameter of our call to `XSelectInput`. We can then listen
-to `ConfigureRequest` events and apply our layout policy!
+satisfying it or totally ignoring it. Only one client (window manager)
+can enable this mask at any given time, so that's why we need to abort
+in case of failure.
 
 Substructure redirection is what allows us to intercept map events so
 that we can effectively wrap top-level windows into frames. Frames
@@ -134,6 +131,13 @@ usually consist of minimize, maximize and exit buttons along with a
 border and a window title. It would have been illogical to target
 non-top-level windows, since these are nothing more than buttons,
 scroll bars, input fields etc.
+
+`SubstructureNotifyMask` will make events associated with
+modifications of top-level windows accessible to our root window, i.e.
+the second parameter of our call to `XSelectInput`. We can then listen
+to `ConfigureRequest` events and apply our layout policy! Note that
+`XMoveResizeWindow` events, as described in the `wm_tile()` function,
+*will not* generate `ConfigureRequest` events.
 
 ## Input Handling
 
@@ -166,5 +170,38 @@ the window manager. Whenever the exit key binding is pressed, the
 window manager is responsible of first querying the list of supported
 protocols of the window being destroyed. If `WM_DELETE_WINDOW` is
 present, the WM should just send a `ClientMessage`. Otherwise,
-the WM is required to abruptly destroying the window via a call to
+the WM is required to abruptly destroy the window via a call to
 `XKillClient`.
+
+### Window Focus
+
+Our tiling window manager will need to update the focus when new
+windows are created without the user having to manually move the mouse
+there. An `XSetInputFocus` might just be enough. We provide
+`RevertToPointerRoot` so that we focus back to our root when the
+windows ceases to be visible.
+
+Remember how atoms are used to communicate between other clients and
+the WM? Well, some applications might need to query which window is
+currently on focus and if that's not them, alter some visual aspect of
+their UI. That's why we always need to keep the `NET_ACTIVE_WINDOW`
+property of our root window up to date at all times. The
+`XChangeProperty` function expects a list of values, 32-bit in this
+case. We'll just provide a single argument of type `XA_WINDOW`.
+
+We should also focus on windows that have just been hovered by the
+cursor, which is done using `EnterNotify` events.
+
+## Layout Policy
+
+I'm not entirely sure if I did this correctly, but it works fine for
+now. Basically, I created a `tile` function which iterates over all
+workspace windows and re-calculates their geometry, which is then
+updated through `XMoveResizeWindow` calls. The "special" window is
+given a column of its own, while the rest of the applications share
+the remainder of the screen. This is a common layout for most tiling
+window managers out there.
+
+Special care had to be taken when a window is first mapped, because
+the X server most often failed to make it visible before our
+`client_focus` call. An explicit `XSync` fixed it!

@@ -17,13 +17,27 @@ typedef struct client_t
     struct client_t *previous;
 } client_t;
 
-typedef client_t* client_list_t;
+typedef struct
+{
+    client_t *data;
+    int length;
+} client_list_t;
 
 void clients_insert(client_list_t *list, client_t *client);
+// NOTE: Will just remove it from the list, you need to destroy it yourself!
+void clients_remove_client(client_list_t *list, client_t *client);
+// Will remove from list and then actually free up the resources
 void clients_destroy_client(client_list_t *list, client_t *client);
 
 client_t* create_client(Window frame, Window window);
-// Returns NULL upon search failure
-client_t* clients_find_by_window(const client_list_t list, Window window);
+
+typedef enum
+{
+    CLIENT_FRAME,
+    CLIENT_WINDOW,
+} client_window_e;
+
+// Returns NULL upon search failure. Makes use of an enum instead of duplicating the implementation
+client_t* clients_find_by_window(const client_list_t list, Window window, client_window_e type);
 
 #endif
