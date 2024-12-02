@@ -12,7 +12,7 @@ OBJECTS := $(patsubst %.c, $(OBJ_DIR)/%.o, $(SOURCES))
 
 L_FLAGS := `pkg-config --libs x11`
 
-.PHONY: run clean
+.PHONY: start_server clean
 .ALL: start_server
 
 # Xephyr starts a brand new X server (display :1) and redirects all visual
