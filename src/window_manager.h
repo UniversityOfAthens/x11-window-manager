@@ -5,6 +5,8 @@
 #include <X11/Xutil.h>
 #include "clients.h"
 
+#define TOTAL_WORKSPACES 9
+
 // Creating an enum-array to store non-predefined atom values
 // Server queries are expensive, so we should cache them!
 typedef enum
@@ -18,21 +20,33 @@ typedef enum
 
 typedef struct
 {
-    Display *conn;
     client_list_t clients;
+    client_t *focused_client;
+
+    // The width of the special window, initially set to half the screen width
+    int special_width;
+} workspace_t;
+
+typedef struct
+{
+    Display *conn;
+    Colormap colormap;
+
+    int active_workspace;
+    workspace_t workspaces[TOTAL_WORKSPACES];
 
     // Dimensions of the entire monitor in pixels
     int width, height;
-    // The width of the special window, initially set to half the screen width
-    int special_width;
-
-    client_t *focused_client;
 
     Atom atoms[TOTAL_ATOMS];
     // We're only dealing with simple, single-monitor setups (as of now)
     Window root;
     bool has_moved_cursor;
     bool is_running;
+
+    // Cache color indices
+    XColor border_color;
+    XColor focused_border_color;
 } wm_t;
 
 void wm_setup(wm_t *wm);
@@ -79,5 +93,6 @@ void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg);
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg);
+void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg);
 
 #endif

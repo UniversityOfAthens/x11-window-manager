@@ -11,9 +11,10 @@ and causing conflicts.
 Similarly to `dwm`, the window manager is customizable through global
 variables and symbolic constants defined in `config.h`.
 
-- [x] Implement a simple tiling layout policy and focus key bindings
-- [ ] Change frame border color on highlighted windows
-- [ ] Support 9 numbered workspaces, just like dwm 
+- [x] Implement a simple tiling layout policy and focus key bindings (with color)
+- [x] Support 9 numbered workspaces, just like dwm 
+- [ ] Modify `tile()` in order to insert gaps between windows. The user should be
+  able to adjust the gap size at runtime, with a couple of key bindings.
 - [ ] Somehow make it stand out! Add something original
 
 <p align="center">
@@ -196,6 +197,21 @@ case. We'll just provide a single argument of type `XA_WINDOW`.
 We should also focus on windows that have just been hovered by the
 cursor, which is done using `EnterNotify` events.
 
+#### Colormaps and Border Color
+
+An Xlib colormap is a data structure that associates integer indices
+with RGB color values. We need to make sure that our desired colors
+are available on our default colormap. A default colormap is created
+for each display connected to our server and can be queried through
+`DefaultColormap()`.
+
+`XAllocNamedColor` will first convert the human-readable color
+nickname (e.g. "red") into an exact RGB value. Then, once the RGB
+value is known, it will allocate a color on the provided colormap and
+return an `XColor` structure, containing the associated colormap index
+(held in the `pixel` field) which can finally be used to modify the
+color of some graphical elements (including window borders).
+
 ## Layout Policy
 
 I'm not entirely sure if I did this correctly, but it works fine for
@@ -209,3 +225,12 @@ window managers out there.
 Special care had to be taken when a window is first mapped, because
 the X server most often failed to make it visible before our
 `client_focus` call. An explicit `XSync` fixed it!
+
+## Workspace Switching
+
+Each workspace must only keep track of its clients, along with its
+active layout configuration and a pointer to the client currently in
+focus. When switching between workspaces, we just need to iterate over
+the active client list and unmap (not destroy!) every single frame
+window. Unmapping is recursive, so the underlying windows will
+immediately become invisible as well.

@@ -17,6 +17,12 @@ bool are_keys_equal(wm_key_t a, wm_key_t b)
     return a.keysym == b.keysym && a.modifiers == b.modifiers;
 }
 
+// Inlining this is definitely useless, I just want to be sure
+static inline workspace_t* get_workspace(wm_t *wm)
+{
+    return &wm->workspaces[wm->active_workspace];
+}
+
 static wm_key_t key_event_to_key(wm_t *wm, const XKeyEvent *event)
 {
     // XKeycodeToKeysym is deprecated, we need to use this instead
@@ -126,21 +132,37 @@ static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
 // Call with NULL to clear focus
 static void focus_client(wm_t *wm, client_t *c)
 {
+    workspace_t *space = get_workspace(wm);
+
+    // The previously focused window's border must be reset 
+    if (space->focused_client)
+        XSetWindowBorder(wm->conn, space->focused_client->frame, wm->border_color.pixel);
+
     if (!c)
     {
         XSetInputFocus(wm->conn, wm->root, RevertToPointerRoot, CurrentTime);
         // Clear the property so that clients understand that no window is currently in focus
         XDeleteProperty(wm->conn, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW]);
-        wm->focused_client = NULL;
+        space->focused_client = NULL;
     }
     else
     {
+        XSetWindowBorder(wm->conn, c->frame, wm->focused_border_color.pixel);
+        // Raise the window so that the entire border is visible
+        XRaiseWindow(wm->conn, c->frame);
+
         set_window_prop(wm, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW], XA_WINDOW, &c->window, 1);
         // The server will generate FocusIn and FocusOut events
         XSetInputFocus(wm->conn, c->window, RevertToPointerRoot, CurrentTime);
         try_send_wm_protocol(wm, c->window, wm->atoms[ATOM_WM_TAKE_FOCUS]);
-        wm->focused_client = c;
+        space->focused_client = c;
     }
+}
+
+static void try_load_named_color(wm_t *wm, const char *id, XColor *color)
+{
+    if (!XAllocNamedColor(wm->conn, wm->colormap, id, color, color))
+        log_fatal("failed to load focused border color");
 }
 
 void wm_setup(wm_t *wm)
@@ -164,9 +186,6 @@ void wm_setup(wm_t *wm)
 
     // An initial root window will always be present
     wm->root = DefaultRootWindow(wm->conn);
-    wm->clients.data = NULL;
-    wm->focused_client = NULL;
-    wm->clients.length = 0;
     wm->is_running = true;
 
     /*
@@ -194,7 +213,21 @@ void wm_setup(wm_t *wm)
     int screen = DefaultScreen(wm->conn);
     wm->width = DisplayWidth(wm->conn, screen);
     wm->height = DisplayHeight(wm->conn, screen);
-    wm->special_width = wm->width / 2;
+
+    for (int i = 0; i < TOTAL_WORKSPACES; i++)
+    {
+        wm->workspaces[i].special_width = wm->width / 2;
+        wm->workspaces[i].clients.data = NULL;
+        wm->workspaces[i].clients.length = 0;
+        wm->workspaces[i].focused_client = NULL;
+    }
+    wm->active_workspace = 0;
+
+    // Load in some colors
+    wm->colormap = DefaultColormap(wm->conn, screen);
+
+    try_load_named_color(wm, "red", &wm->focused_border_color);
+    try_load_named_color(wm, "white", &wm->border_color);
 
     puts("WM was initialized successfully");
 }
@@ -212,34 +245,36 @@ static void move_and_resize_client(wm_t *wm, client_t *c, int x, int y, int w, i
  */
 static void tile(wm_t *wm)
 {
+    workspace_t *space = get_workspace(wm);
+
     // Setting to false to prevent EnterNotify events from firing because of
     // the cursor now being above a brand new window.
     wm->has_moved_cursor = false;
 
-    if (wm->clients.length == 0) return;
+    if (space->clients.length == 0) return;
 
-    int max_width = wm->width - 2 * WM_BORDER_WIDTH;
-    int max_height = wm->height - 2 * WM_BORDER_WIDTH;
+    const int max_width = wm->width - 2 * WM_BORDER_WIDTH;
+    const int max_height = wm->height - 2 * WM_BORDER_WIDTH;
 
-    if (wm->clients.length == 1)
+    if (space->clients.length == 1)
     {
-        move_and_resize_client(wm, wm->clients.data, 0, 0, max_width, max_height);
+        move_and_resize_client(wm, space->clients.data, 0, 0, max_width, max_height);
     }
     else
     {
         // The head of the clients list, also known as the special window,
         // will capture a whole pane on its own.
-        move_and_resize_client(wm, wm->clients.data, 0, 0, wm->special_width, max_height);
-        int remaining_width = max_width - wm->special_width;
+        move_and_resize_client(wm, space->clients.data, 0, 0, space->special_width, max_height);
+        const int remaining_width = max_width - space->special_width;
 
         // The other windows will just share the remaining space
-        int other_height = max_height / (wm->clients.length - 1);
+        int other_height = max_height / (space->clients.length - 1);
         int i = 0;
 
-        for (client_t *c = wm->clients.data->next; c; c = c->next, i++)
+        for (client_t *c = space->clients.data->next; c; c = c->next, i++)
         {
             move_and_resize_client(wm, c,
-                    wm->special_width, i * other_height,
+                    space->special_width, i * other_height,
                     remaining_width, other_height);
         }
     }
@@ -247,6 +282,8 @@ static void tile(wm_t *wm)
 
 static void frame_window(wm_t *wm, Window window)
 {
+    workspace_t *space = get_workspace(wm);
+
     // Fetch the window's attributes so that we can create a matching frame with a border
     XWindowAttributes window_attrs;
     XGetWindowAttributes(wm->conn, window, &window_attrs);
@@ -275,7 +312,7 @@ static void frame_window(wm_t *wm, Window window)
 
     // The change should be reflected to our internal state
     client_t *client = create_client(frame, window);
-    clients_insert(&wm->clients, client);
+    clients_insert(&space->clients, client);
 
     // Register possible bindings
     grab_key(wm, wm_kill_client_key, window);
@@ -289,6 +326,7 @@ static void frame_window(wm_t *wm, Window window)
  */
 static void unframe_client(wm_t *wm, client_t *client)
 {
+    workspace_t *space = get_workspace(wm);
     XSetErrorHandler(dummy_error_handler);
 
     // Unmap frame and reparent window
@@ -299,26 +337,28 @@ static void unframe_client(wm_t *wm, client_t *client)
     // Destroy frame and delete client entry from state
     XDestroyWindow(wm->conn, client->frame);
 
-    if (wm->focused_client == client)
+    if (space->focused_client == client)
         focus_client(wm, client->previous ? client->previous : client->next);
 
-    clients_destroy_client(&wm->clients, client);
+    clients_destroy_client(&space->clients, client);
 
     XSync(wm->conn, false);
-
     XSetErrorHandler(on_x_error);
 }
 
 static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
 {
+    workspace_t *space = get_workspace(wm);
     // First, ensure that the unmapped window is actually a client that we manage
-    client_t *client = clients_find_by_window(wm->clients, event->window, CLIENT_WINDOW);
+    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
 
     if (!client)
         return;
 
     // The window is invisible, so get rid of the frame
     // Since minimized windows will not be supported, unmap is pretty much identical to destruction
+    // We might unmap frame windows during workspace switching,
+    //   but notice that we won't reach this line of code
     unframe_client(wm, client);
     tile(wm);
 }
@@ -337,7 +377,7 @@ static void kill_client(wm_t *wm, Window window)
  */
 static void on_key_press(wm_t *wm, const XKeyEvent *event)
 {
-    wm_key_t key = key_event_to_key(wm, event);
+    const wm_key_t key = key_event_to_key(wm, event);
 
     if (are_keys_equal(wm_kill_client_key, key))
         return kill_client(wm, event->window);
@@ -355,13 +395,15 @@ static void on_key_press(wm_t *wm, const XKeyEvent *event)
  */
 static void on_map_request(wm_t *wm, const XMapRequestEvent *event)
 {
+    workspace_t *space = get_workspace(wm);
+
     frame_window(wm, event->window);
     XMapWindow(wm->conn, event->window);
 
     // Wait until the mapping request is done, and only then change focus!
     // The new window will always be the root of our list
     XSync(wm->conn, false);
-    focus_client(wm, wm->clients.data);
+    focus_client(wm, space->clients.data);
 
     tile(wm);
 }
@@ -386,9 +428,10 @@ static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
 static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
 {
     if (!wm->has_moved_cursor) return;
+    workspace_t *space = get_workspace(wm);
 
     // Frames are top-level, we should be searching for those
-    client_t *client = clients_find_by_window(wm->clients, event->window, CLIENT_FRAME);
+    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_FRAME);
 
     if (client)
         focus_client(wm, client);
@@ -450,34 +493,67 @@ void wm_spawn(wm_t *wm, const wm_arg_t arg)
 
 void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
 {
-    int new_width = wm->special_width + arg.amount;
+    workspace_t *space = get_workspace(wm);
+
+    int new_width = space->special_width + arg.amount;
     if (new_width < WM_SPECIAL_PADDING || new_width > wm->width - WM_SPECIAL_PADDING) return;
 
-    wm->special_width = new_width;
+    space->special_width = new_width;
     tile(wm);
 }
 
 // This is once again inspired by dwm and vim
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
 {
-    if (wm->focused_client && wm->focused_client->next)
-        focus_client(wm, wm->focused_client->next);
+    workspace_t *space = get_workspace(wm);
+
+    if (space->focused_client && space->focused_client->next)
+        focus_client(wm, space->focused_client->next);
 }
 
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
 {
-    if (wm->focused_client && wm->focused_client->previous)
-        focus_client(wm, wm->focused_client->previous);
+    workspace_t *space = get_workspace(wm);
+
+    if (space->focused_client && space->focused_client->previous)
+        focus_client(wm, space->focused_client->previous);
 }
 
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
 {
-    if (wm->focused_client && wm->clients.length > 1)
+    workspace_t *space = get_workspace(wm);
+
+    if (space->focused_client && space->clients.length > 1)
     {
         // Remove from list and then insert again as root (special window)
-        clients_remove_client(&wm->clients, wm->focused_client);
-        clients_insert(&wm->clients, wm->focused_client);
+        clients_remove_client(&space->clients, space->focused_client);
+        clients_insert(&space->clients, space->focused_client);
 
         tile(wm);
     }
+}
+
+void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
+{
+    if (wm->active_workspace == arg.amount) return;
+    workspace_t *space = get_workspace(wm);
+
+    // Unmap all clients in the current workspace, making them temporarily invisible
+    for (client_t *c = space->clients.data; c; c = c->next)
+    {
+        XUnmapWindow(wm->conn, c->frame);
+    }
+
+    wm->active_workspace = arg.amount;
+    // Prevent expected enter notify events from changing focus
+    wm->has_moved_cursor = false;
+    space = get_workspace(wm);
+
+    for (client_t *c = space->clients.data; c; c = c->next)
+    {
+        XMapWindow(wm->conn, c->frame);
+    }
+
+    // Focus back on the window that was active last time we left
+    focus_client(wm, space->focused_client);
 }

@@ -10,6 +10,7 @@
 #define WM_BORDER_COLOR 0xffffff
 #define WM_SPECIAL_PADDING 50
 
+#define SWITCH_WORK(k, n) { {WM_MOD_MASK, k}, wm_switch_to_workspace, {.amount = n} }
 // The -c option indicates that the commands should be read from the argument list
 // /bin/sh is a symlink to our default POSIX-compliant shell (probably Bash)
 #define SHELL_CMD(cmd) { "/bin/sh", "-c", cmd, NULL }
@@ -29,6 +30,11 @@ static wm_binding_t wm_bindings[] = {
     { {WM_MOD_MASK, XK_j}, wm_focus_on_next, NULL},
     { {WM_MOD_MASK, XK_k}, wm_focus_on_previous, NULL},
     { {WM_MOD_MASK, XK_Return}, wm_make_focused_special, NULL},
+
+    // Workspace switching bindings, this is going to be repetitive
+    SWITCH_WORK(XK_1, 0), SWITCH_WORK(XK_2, 1), SWITCH_WORK(XK_3, 2),
+    SWITCH_WORK(XK_4, 3), SWITCH_WORK(XK_5, 4), SWITCH_WORK(XK_6, 5),
+    SWITCH_WORK(XK_7, 6), SWITCH_WORK(XK_8, 7), SWITCH_WORK(XK_9, 8),
 };
 
 #endif
