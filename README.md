@@ -12,9 +12,11 @@ Similarly to `dwm`, the window manager is customizable through global
 variables and symbolic constants defined in `config.h`.
 
 - [x] Implement a simple tiling layout policy and focus key bindings (with color)
-- [x] Support 9 numbered workspaces, just like dwm 
+- [x] Support 9 numbered workspaces, just like dwm
 - [ ] Modify `tile()` in order to insert gaps between windows. The user should be
   able to adjust the gap size at runtime, with a couple of key bindings.
+- [ ] Implement floating windows (move, resize, toggle floating state),
+  and make that the default for clients that present related hints
 - [ ] Somehow make it stand out! Add something original
 
 <p align="center">
