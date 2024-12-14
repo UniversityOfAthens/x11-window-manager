@@ -15,8 +15,8 @@ L_FLAGS := `pkg-config --libs x11`
 .PHONY: start_server clean
 .ALL: start_server
 
-# Xephyr starts a brand new X server (display :1) and redirects all visual
-# output to an X window running on our current X server!
+# Xephyr starts a brand new X server and redirects all visual
+# output to an ordinary X window running on our active, "host" X server!
 # Each server is responsible for a single display (which is a combination
 #  of potentially multiple screens along with their input devices)
 start_server: $(EXE_NAME)
