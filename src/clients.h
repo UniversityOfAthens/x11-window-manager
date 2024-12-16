@@ -37,7 +37,8 @@ typedef enum
     CLIENT_WINDOW,
 } client_window_e;
 
-// Returns NULL upon search failure. Makes use of an enum instead of duplicating the implementation
-client_t* clients_find_by_window(const client_list_t list, Window window, client_window_e type);
+// Returns NULL upon search failure
+client_t* clients_find_by_window(const client_list_t list,
+                                 Window window, client_window_e type);
 
 #endif

@@ -10,7 +10,10 @@
 #define WM_BORDER_COLOR 0xffffff
 #define WM_SPECIAL_PADDING 50
 
-#define SWITCH_WORK(k, n) { {WM_MOD_MASK, k}, wm_switch_to_workspace, {.amount = n} }
+#define SWITCH_WORK(k, n)                                                  \
+    { {WM_MOD_MASK, k}, wm_switch_to_workspace, {.amount = n} },           \
+    { {WM_MOD_MASK | ShiftMask, k}, wm_send_to_workspace, {.amount = n} }  \
+
 // The -c option indicates that the commands should be read from the argument list
 // /bin/sh is a symlink to our default POSIX-compliant shell (probably Bash)
 #define SHELL_CMD(cmd) { "/bin/sh", "-c", cmd, NULL }

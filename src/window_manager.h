@@ -94,5 +94,6 @@ void wm_focus_on_next(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg);
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg);
 void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg);
+void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg);
 
 #endif

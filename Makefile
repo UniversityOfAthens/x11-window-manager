@@ -26,7 +26,7 @@ start_server: $(EXE_NAME)
 $(EXE_NAME): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $(EXE_NAME) $(L_FLAGS)
 
-objects/%.o: %.c src/config.h
+$(OBJ_DIR)/%.o: %.c src/config.h
 	@# Making sure that the directory already exists before creating the object
 	@# All object files will be placed on a special, isolated directory
 	@mkdir -p $(dir $@)

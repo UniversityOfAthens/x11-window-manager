@@ -36,20 +36,16 @@ void clients_remove_client(client_list_t *list, client_t *client)
     
     // If we're at the beginning of the list, just move forward
     if (client->previous == NULL)
-    {
-        if (client->next)
-            client->next->previous = NULL;
-
         list->data = client->next;
-    }
-    else
-    {
+
+    if (client->next)
+        client->next->previous = client->previous;
+
+    if (client->previous)
         client->previous->next = client->next;
 
-        if (client->next)
-            client->next->previous = client->previous;
-    }
-
+    // The client might now be inserted on a brand new list,
+    // we can't just leave it into an invalid state
     client->next = client->previous = NULL;
     list->length--;
 }

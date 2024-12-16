@@ -130,10 +130,8 @@ static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
 }
 
 // Call with NULL to clear focus
-static void focus_client(wm_t *wm, client_t *c)
+static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
 {
-    workspace_t *space = get_workspace(wm);
-
     // The previously focused window's border must be reset 
     if (space->focused_client)
         XSetWindowBorder(wm->conn, space->focused_client->frame, wm->border_color.pixel);
@@ -240,13 +238,11 @@ static void move_and_resize_client(wm_t *wm, client_t *c, int x, int y, int w, i
 }
 
 /*
- * Re-calculate all tiling positions in a single monitor
+ * Re-calculate all tiling positions in a single workspace
  * This should generally be called after ground-breaking layout changes
  */
-static void tile(wm_t *wm)
+static void tile(wm_t *wm, workspace_t *space)
 {
-    workspace_t *space = get_workspace(wm);
-
     // Setting to false to prevent EnterNotify events from firing because of
     // the cursor now being above a brand new window.
     wm->has_moved_cursor = false;
@@ -338,7 +334,7 @@ static void unframe_client(wm_t *wm, client_t *client)
     XDestroyWindow(wm->conn, client->frame);
 
     if (space->focused_client == client)
-        focus_client(wm, client->previous ? client->previous : client->next);
+        focus_client(wm, space, client->previous ? client->previous : client->next);
 
     clients_destroy_client(&space->clients, client);
 
@@ -360,7 +356,7 @@ static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
     // We might unmap frame windows during workspace switching,
     //   but notice that we won't reach this line of code
     unframe_client(wm, client);
-    tile(wm);
+    tile(wm, space);
 }
 
 static void kill_client(wm_t *wm, Window window)
@@ -403,9 +399,9 @@ static void on_map_request(wm_t *wm, const XMapRequestEvent *event)
     // Wait until the mapping request is done, and only then change focus!
     // The new window will always be the root of our list
     XSync(wm->conn, false);
-    focus_client(wm, space->clients.data);
+    focus_client(wm, space, space->clients.data);
 
-    tile(wm);
+    tile(wm, space);
 }
 
 static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
@@ -434,7 +430,7 @@ static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
     client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_FRAME);
 
     if (client)
-        focus_client(wm, client);
+        focus_client(wm, space, client);
 }
 
 static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
@@ -499,7 +495,7 @@ void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
     if (new_width < WM_SPECIAL_PADDING || new_width > wm->width - WM_SPECIAL_PADDING) return;
 
     space->special_width = new_width;
-    tile(wm);
+    tile(wm, space);
 }
 
 // This is once again inspired by dwm and vim
@@ -508,7 +504,7 @@ void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
     workspace_t *space = get_workspace(wm);
 
     if (space->focused_client && space->focused_client->next)
-        focus_client(wm, space->focused_client->next);
+        focus_client(wm, space, space->focused_client->next);
 }
 
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
@@ -516,7 +512,7 @@ void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
     workspace_t *space = get_workspace(wm);
 
     if (space->focused_client && space->focused_client->previous)
-        focus_client(wm, space->focused_client->previous);
+        focus_client(wm, space, space->focused_client->previous);
 }
 
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
@@ -529,7 +525,7 @@ void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
         clients_remove_client(&space->clients, space->focused_client);
         clients_insert(&space->clients, space->focused_client);
 
-        tile(wm);
+        tile(wm, space);
     }
 }
 
@@ -555,5 +551,29 @@ void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
     }
 
     // Focus back on the window that was active last time we left
-    focus_client(wm, space->focused_client);
+    focus_client(wm, space, space->focused_client);
+}
+
+// Send the application currently in focus to the provided workspace
+void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
+{
+    if (wm->active_workspace == arg.amount) return;
+    workspace_t *source = get_workspace(wm);
+    workspace_t *target = &wm->workspaces[arg.amount];
+
+    // If no client is currently focused, ignore
+    if (!source->focused_client) return;
+    client_t *client = source->focused_client;
+
+    // Remove entry from list and add to target
+    clients_remove_client(&source->clients, client);
+    clients_insert(&target->clients, client);
+        
+    // The window is gone, focus on special and make the old one invisible
+    focus_client(wm, source, source->clients.data);
+    XUnmapWindow(wm->conn, client->frame);
+    focus_client(wm, target, client);
+
+    tile(wm, source);
+    tile(wm, target);
 }
