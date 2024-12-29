@@ -236,3 +236,23 @@ focus. When switching between workspaces, we just need to iterate over
 the active client list and unmap (not destroy!) every single frame
 window. Unmapping is recursive, so the underlying windows will
 immediately become invisible as well.
+
+## Floating Windows
+
+Implementing floating windows was relatively easy. A call to
+`should_client_float` will initially query the `_NET_WM_WINDOW_TYPE`
+property. If that's defined and equal to `_NET_WM_WINDOW_TYPE_DIALOG`,
+the window is marked as floating and the `tile` function does not take
+it into consideration anymore.
+
+It seems like this property is rarely enabled in the wild though. Some
+windows that prefer to float will leave the previous property
+undefined. In that case, we should query the `WM_TRANSIENT_FOR` hint
+(whatever that is!) in place of the original.
+
+Some windows will provide a set of ranges for their preferred
+dimensions. They can be read using `XGetWMNormalHints`. Windows that
+prefer not to be resized will usually set both the minimum and maximum
+width and height to a constant, so that only a single value is ever
+allowed. We should generally respect these preferences, although we
+aren't obliged to!

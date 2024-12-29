@@ -2,6 +2,7 @@
 #define _WM_CONFIG_H
 
 #include "window_manager.h"
+#include <X11/XF86keysym.h>
 
 // Using the super (windows) key as a binding prefix
 #define WM_MOD_MASK Mod4Mask
@@ -16,16 +17,13 @@
 
 // The -c option indicates that the commands should be read from the argument list
 // /bin/sh is a symlink to our default POSIX-compliant shell (probably Bash)
-#define SHELL_CMD(cmd) { .strs = (const char*[]) { "/bin/sh", "-c", cmd, NULL } }
-
-static const char* wm_app_launcher[] = { "dmenu_run", NULL };
-static const char* wm_terminal_cmd[] = { "xterm", NULL };
+#define SHELL(cmd) { .strs = (const char*[]) { "/bin/sh", "-c", cmd, NULL } }
 
 static wm_key_t wm_kill_client_key = { WM_MOD_MASK | ShiftMask, XK_q };
 
 static wm_binding_t wm_bindings[] = {
-    { {WM_MOD_MASK,             XK_p}, wm_spawn, wm_app_launcher },
-    { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, wm_terminal_cmd },
+    { {WM_MOD_MASK,             XK_p}, wm_spawn, SHELL("dmenu_run") },
+    { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, SHELL("xterm") },
     { {WM_MOD_MASK | ShiftMask, XK_e}, wm_quit, NULL },
 
     { {WM_MOD_MASK, XK_l}, wm_adjust_special_width, {.amount = 20} },
@@ -40,6 +38,11 @@ static wm_binding_t wm_bindings[] = {
     SWITCH_WORK(XK_7, 6), SWITCH_WORK(XK_8, 7), SWITCH_WORK(XK_9, 8),
 
     { {WM_MOD_MASK, XK_t}, wm_toggle_float },
+
+    // Audio volume controls
+    { {0, XF86XK_AudioLowerVolume}, wm_spawn, SHELL("pactl set-sink-volume 0 -5%") },
+    { {0, XF86XK_AudioRaiseVolume}, wm_spawn, SHELL("pactl set-sink-volume 0 +5%") },
+    { {0, XF86XK_AudioMute},        wm_spawn, SHELL("pactl set-sink-mute 0 toggle") },
 };
 
 #endif

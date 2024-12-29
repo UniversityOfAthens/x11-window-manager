@@ -150,22 +150,29 @@ static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
     XChangeProperty(wm->conn, w, a, type, 32, PropModeReplace, (unsigned char*) values, total);
 }
 
-static bool check_if_should_floating(wm_t *wm, client_t *c)
+static bool should_client_float(wm_t *wm, client_t *c)
 {
+    // If the client is fixed in size, float it
+    // It does not expect to live inside a tiling window manager
+    if (c->max_width == c->min_width && c->max_height == c->min_height)
+        return true;
+
     Atom type = get_window_prop(wm, c->window, wm->atoms[ATOM_WM_WINDOW_TYPE]);
-    c->is_floating = false;
 
     // _NET_WM_WINDOW_TYPE_DIALOG indicates that this is a dialog window.
     if (type == wm->atoms[ATOM_WM_DIALOG_TYPE])
-        c->is_floating = true;
-    else
+        return true;
+
+    else if (type == None)
     {
         // Quoting from freedesktop.org: If _NET_WM_WINDOW_TYPE is not set,
         // then managed windows with WM_TRANSIENT_FOR set MUST be taken as this type.
         Window trans = None;
         if (XGetTransientForHint(wm->conn, c->window, &trans))
-            c->is_floating = true;
+            return true;
     }
+
+    return false;
 }
 
 // Sounds like a magic trick
@@ -400,8 +407,8 @@ static void frame_window(wm_t *wm, Window window)
     // Any mapped child with an unmapped ancestor will behave as if unmapped
     XMapWindow(wm->conn, frame);
 
-    check_if_should_floating(wm, client);
     get_size_hints(wm, client);
+    client->is_floating = should_client_float(wm, client);
 
     // Register possible bindings
     grab_key(wm, wm_kill_client_key, window);
@@ -706,12 +713,13 @@ void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
+    client_t *f = space->focused_client;
 
-    if (space->focused_client && space->clients.length > 1)
+    if (f && !f->is_floating && space->clients.length > 1)
     {
         // Remove from list and then insert again as root (special window)
-        clients_remove_client(&space->clients, space->focused_client);
-        clients_insert(&space->clients, space->focused_client);
+        clients_remove_client(&space->clients, f);
+        clients_insert(&space->clients, f);
 
         tile(wm, space);
     }
