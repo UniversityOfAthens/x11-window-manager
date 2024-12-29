@@ -129,12 +129,18 @@ static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
     XChangeProperty(wm->conn, w, a, type, 32, PropModeReplace, (unsigned char*) values, total);
 }
 
-// Call with NULL to clear focus
-static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
+// Sounds like a magic trick
+static void unfocus_focused(wm_t *wm, workspace_t *space)
 {
     // The previously focused window's border must be reset 
     if (space->focused_client)
         XSetWindowBorder(wm->conn, space->focused_client->frame, wm->border_color.pixel);
+}
+
+// Call with NULL to clear focus
+static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
+{
+    unfocus_focused(wm, space);
 
     if (!c)
     {
@@ -572,7 +578,10 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
     // The window is gone, focus on special and make the old one invisible
     focus_client(wm, source, source->clients.data);
     XUnmapWindow(wm->conn, client->frame);
-    focus_client(wm, target, client);
+    // WARNING: We don't want to focus_client since the window is currently unmapped
+    // If you try to do this, X11 will explode
+    unfocus_focused(wm, target);
+    target->focused_client = client;
 
     tile(wm, source);
     tile(wm, target);
