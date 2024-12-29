@@ -25,6 +25,8 @@ void clients_insert(client_list_t *list, client_t *client)
         client->next = list->data;
         list->data->previous = client;
     }    
+    else
+        list->tail = client;
         
     list->data = client;
     list->length++;
@@ -38,7 +40,9 @@ void clients_remove_client(client_list_t *list, client_t *client)
     if (client->previous == NULL)
         list->data = client->next;
 
-    if (client->next)
+    if (client->next == NULL)
+        list->tail = client->previous;
+    else
         client->next->previous = client->previous;
 
     if (client->previous)

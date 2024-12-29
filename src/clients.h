@@ -1,6 +1,7 @@
 #ifndef _WM_CLIENTS_H
 #define _WM_CLIENTS_H
 
+#include <stdbool.h>
 #include <X11/Xutil.h>
 
 /*
@@ -12,6 +13,11 @@ typedef struct client_t
 {
     Window frame;
     Window window;
+    bool is_floating;
+
+    // These will be left to -1 when disabled
+    int min_width, min_height;
+    int max_width, max_height;
 
     struct client_t *next;
     struct client_t *previous;
@@ -20,6 +26,9 @@ typedef struct client_t
 typedef struct
 {
     client_t *data;
+    // Storing last item for faster access
+    client_t *tail;
+
     int length;
 } client_list_t;
 

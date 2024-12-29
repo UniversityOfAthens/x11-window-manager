@@ -15,6 +15,8 @@ typedef enum
     ATOM_WM_DELETE_WINDOW,
     ATOM_WM_TAKE_FOCUS,
     ATOM_NET_ACTIVE_WINDOW,
+    ATOM_WM_WINDOW_TYPE,
+    ATOM_WM_DIALOG_TYPE,
     TOTAL_ATOMS,
 } wm_atom_e;
 
@@ -38,6 +40,13 @@ typedef struct
     // Dimensions of the entire monitor in pixels
     int width, height;
 
+    int drag_cursor_x, drag_cursor_y;
+    // Storing information about the window currently being dragged or resized
+    int drag_window_x, drag_window_y;
+    unsigned int drag_window_w, drag_window_h;
+    // Will be equal to NULL when no client is being dragged
+    client_t *dragged_client;
+
     Atom atoms[TOTAL_ATOMS];
     // We're only dealing with simple, single-monitor setups (as of now)
     Window root;
@@ -60,7 +69,7 @@ void wm_cleanup(wm_t *wm);
  */
 typedef union
 {
-    const char **str_array;
+    const char **strs;
     int amount;
 } wm_arg_t;
 
@@ -90,6 +99,7 @@ void wm_quit(wm_t *wm, const wm_arg_t arg);
 // The argument represents dx, min and max bound checking will be applied
 void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg);
 
+void wm_toggle_float(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg);
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg);

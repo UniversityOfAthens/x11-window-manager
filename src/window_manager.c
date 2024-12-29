@@ -122,11 +122,50 @@ static bool try_send_wm_protocol(wm_t *wm, Window window, Atom protocol)
     return is_supported;
 }
 
+// This function returns None if the specified property does not exist on the given window
+static Atom get_window_prop(wm_t *wm, Window w, Atom prop)
+{
+    Atom type, value;
+    unsigned char *data = NULL;
+    // These can all be ignored for now, we won't be needing them
+    int format;
+    unsigned long items, rem_bytes;
+
+    if (XGetWindowProperty(wm->conn, w, prop, 0L, sizeof(Atom), false,
+            XA_ATOM, &type, &format, &items, &rem_bytes, &data) == Success && data)
+    {
+        value = *(Atom*) data;
+        XFree(data);
+    }
+
+    // X11 will indicate that the property does not exist
+    // by filling in the type variable with the value of None
+    return type != None ? value : None;
+}
+
 static void set_window_prop(wm_t *wm, Window w, Atom a, Atom type,
                             unsigned long *values, unsigned long total)
 {
     // Set the property, overriding the previous value if set
     XChangeProperty(wm->conn, w, a, type, 32, PropModeReplace, (unsigned char*) values, total);
+}
+
+static bool check_if_should_floating(wm_t *wm, client_t *c)
+{
+    Atom type = get_window_prop(wm, c->window, wm->atoms[ATOM_WM_WINDOW_TYPE]);
+    c->is_floating = false;
+
+    // _NET_WM_WINDOW_TYPE_DIALOG indicates that this is a dialog window.
+    if (type == wm->atoms[ATOM_WM_DIALOG_TYPE])
+        c->is_floating = true;
+    else
+    {
+        // Quoting from freedesktop.org: If _NET_WM_WINDOW_TYPE is not set,
+        // then managed windows with WM_TRANSIENT_FOR set MUST be taken as this type.
+        Window trans = None;
+        if (XGetTransientForHint(wm->conn, c->window, &trans))
+            c->is_floating = true;
+    }
 }
 
 // Sounds like a magic trick
@@ -152,8 +191,6 @@ static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
     else
     {
         XSetWindowBorder(wm->conn, c->frame, wm->focused_border_color.pixel);
-        // Raise the window so that the entire border is visible
-        XRaiseWindow(wm->conn, c->frame);
 
         set_window_prop(wm, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW], XA_WINDOW, &c->window, 1);
         // The server will generate FocusIn and FocusOut events
@@ -191,6 +228,7 @@ void wm_setup(wm_t *wm)
     // An initial root window will always be present
     wm->root = DefaultRootWindow(wm->conn);
     wm->is_running = true;
+    wm->dragged_client = NULL;
 
     /*
      * Checking whether we've got a right for Substructure Redirection
@@ -212,6 +250,8 @@ void wm_setup(wm_t *wm)
     wm->atoms[ATOM_WM_PROTOCOLS] = XInternAtom(wm->conn, "WM_PROTOCOLS", false);
     wm->atoms[ATOM_WM_DELETE_WINDOW] = XInternAtom(wm->conn, "WM_DELETE_WINDOW", false);
     wm->atoms[ATOM_NET_ACTIVE_WINDOW] = XInternAtom(wm->conn, "_NET_ACTIVE_WINDOW", false);
+    wm->atoms[ATOM_WM_WINDOW_TYPE] = XInternAtom(wm->conn, "_NET_WM_WINDOW_TYPE", false);
+    wm->atoms[ATOM_WM_DIALOG_TYPE] = XInternAtom(wm->conn, "_NET_WM_WINDOW_TYPE_DIALOG", false);
     create_bindings(wm);
 
     int screen = DefaultScreen(wm->conn);
@@ -236,6 +276,38 @@ void wm_setup(wm_t *wm)
     puts("WM was initialized successfully");
 }
 
+static void get_size_hints(wm_t *wm, client_t *c)
+{
+    XSizeHints hints;
+    // We can ignore this value safely
+    long supplied_return;
+
+    // Initialize everything to negative one to mark them as disabled
+    c->min_width = c->max_width = -1;
+    c->min_height = c->max_height = -1;
+
+    if (XGetWMNormalHints(wm->conn, c->window, &hints, &supplied_return))
+    {
+        if (hints.flags & PMinSize)
+        {
+            c->min_width = hints.min_width;
+            c->min_height = hints.min_height;
+        }
+        if (hints.flags & PMaxSize)
+        {
+            c->max_width = hints.max_width;
+            c->max_height = hints.max_height;
+        }
+    }
+}
+
+// Should be prefered when only resizing is needed
+static void resize_client(wm_t *wm, client_t *c, int w, int h)
+{
+    XResizeWindow(wm->conn, c->frame, w, h);
+    XResizeWindow(wm->conn, c->window, w, h);
+}
+
 static void move_and_resize_client(wm_t *wm, client_t *c, int x, int y, int w, int h)
 {
     XMoveResizeWindow(wm->conn, c->frame, x, y, w, h);
@@ -253,31 +325,43 @@ static void tile(wm_t *wm, workspace_t *space)
     // the cursor now being above a brand new window.
     wm->has_moved_cursor = false;
 
-    if (space->clients.length == 0) return;
+    // Do not consider floating windows
+    int tiled_clients = 0;
+    for (client_t *c = space->clients.data; c; c = c->next)
+        tiled_clients += (!c->is_floating);
+
+    if (tiled_clients == 0) return;
 
     const int max_width = wm->width - 2 * WM_BORDER_WIDTH;
     const int max_height = wm->height - 2 * WM_BORDER_WIDTH;
 
-    if (space->clients.length == 1)
+    // Find the first non-floating window
+    client_t *special = space->clients.data;
+    while (special->is_floating) special = special->next;
+
+    if (tiled_clients == 1)
     {
-        move_and_resize_client(wm, space->clients.data, 0, 0, max_width, max_height);
+        move_and_resize_client(wm, special, 0, 0, max_width, max_height);
     }
     else
     {
         // The head of the clients list, also known as the special window,
         // will capture a whole pane on its own.
-        move_and_resize_client(wm, space->clients.data, 0, 0, space->special_width, max_height);
-        const int remaining_width = max_width - space->special_width;
+        move_and_resize_client(wm, special, 0, 0, space->special_width, max_height);
+        const int rem_width = max_width - space->special_width;
 
         // The other windows will just share the remaining space
-        int other_height = max_height / (space->clients.length - 1);
+        int other_height = max_height / (tiled_clients - 1);
         int i = 0;
 
-        for (client_t *c = space->clients.data->next; c; c = c->next, i++)
+        for (client_t *c = special->next; c; c = c->next)
         {
-            move_and_resize_client(wm, c,
-                    space->special_width, i * other_height,
-                    remaining_width, other_height);
+            if (c->is_floating)
+                continue;
+
+            move_and_resize_client(wm, c, space->special_width, i * other_height,
+                    rem_width, other_height);
+            i++;
         }
     }
 }
@@ -296,6 +380,10 @@ static void frame_window(wm_t *wm, Window window)
         window_attrs.width, window_attrs.height,
         WM_BORDER_WIDTH, WM_BORDER_COLOR, 0x000000);
 
+    // The change should be reflected to our internal state
+    client_t *client = create_client(frame, window);
+    clients_insert(&space->clients, client);
+
     /*
      * Forward substructure (geometry, configuration) events of child window to frame,
      * so that they're collected by the root which has enabled substructure
@@ -312,12 +400,20 @@ static void frame_window(wm_t *wm, Window window)
     // Any mapped child with an unmapped ancestor will behave as if unmapped
     XMapWindow(wm->conn, frame);
 
-    // The change should be reflected to our internal state
-    client_t *client = create_client(frame, window);
-    clients_insert(&space->clients, client);
+    check_if_should_floating(wm, client);
+    get_size_hints(wm, client);
 
     // Register possible bindings
     grab_key(wm, wm_kill_client_key, window);
+
+    // Capture move and resize bindings
+    XGrabButton(wm->conn, Button1, WM_MOD_MASK, window, false,
+            ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
+            GrabModeAsync, GrabModeAsync, None, None);
+
+    XGrabButton(wm->conn, Button3, WM_MOD_MASK, window, false,
+            ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
+            GrabModeAsync, GrabModeAsync, None, None);
 }
 
 /*
@@ -338,6 +434,9 @@ static void unframe_client(wm_t *wm, client_t *client)
     XRemoveFromSaveSet(wm->conn, client->window);
     // Destroy frame and delete client entry from state
     XDestroyWindow(wm->conn, client->frame);
+
+    if (client == wm->dragged_client)
+        wm->dragged_client = NULL;
 
     if (space->focused_client == client)
         focus_client(wm, space, client->previous ? client->previous : client->next);
@@ -422,8 +521,15 @@ static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
         .stack_mode = event->detail,
     };
 
-    // TODO: Why does this work? Also, why does this event get called so rarely?
-    // More specifically, why does it only get called when xterm is trying to start?!
+    workspace_t *space = get_workspace(wm);
+    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
+
+    if (client)
+    {
+        // Something might be wrong, this never gets called
+        puts("this is a window I'm managing");
+    }
+
     XConfigureWindow(wm->conn, event->window, event->value_mask, &changes);
 }
 
@@ -439,9 +545,74 @@ static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
         focus_client(wm, space, client);
 }
 
+static void on_button_press(wm_t *wm, const XButtonEvent *event)
+{
+    /*
+     * Will trigger manual floating window resizing and positioning. We're going
+     * to be storing the initial position and size as a reference point. 
+     */
+    workspace_t *space = get_workspace(wm);
+    client_t *c = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
+    if (!c)
+        return;
+
+    wm->drag_cursor_x = event->x_root;
+    wm->drag_cursor_y = event->y_root;
+
+    Window root;
+    unsigned int border_width, depth;
+
+    if (!XGetGeometry(wm->conn, c->frame, &root,
+            &wm->drag_window_x, &wm->drag_window_y,
+            &wm->drag_window_w, &wm->drag_window_h, &border_width, &depth))
+    {
+        log_fatal("failed to fetch geometry of client during button press");
+    }
+
+    XRaiseWindow(wm->conn, c->frame);
+    wm->dragged_client = c;
+
+    // The window should now be floating if it isn't already
+    if (!c->is_floating)
+    {
+        c->is_floating = true;
+        tile(wm, space);
+    }
+}
+
+static void on_button_release(wm_t *wm, const XButtonEvent *event)
+{
+    wm->dragged_client = NULL;
+}
+
 static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
 {
     wm->has_moved_cursor = true;
+    if (!wm->dragged_client)
+        return;
+
+    client_t *c = wm->dragged_client;
+
+    // The user is trying to move the window
+    if (event->state & Button1Mask)
+    {
+        XMoveWindow(wm->conn, c->frame,
+            wm->drag_window_x + (event->x_root - wm->drag_cursor_x),
+            wm->drag_window_y + (event->y_root - wm->drag_cursor_y));
+    }
+    else if (event->state & Button3Mask)
+    {
+        int new_w = wm->drag_window_w + (event->x_root - wm->drag_cursor_x);
+        int new_h = wm->drag_window_h + (event->y_root - wm->drag_cursor_y);
+
+        // If the client has an explicit maximum size, respect it
+        if (c->max_width != -1) new_w = MIN(new_w, c->max_width);
+        if (c->min_width != -1) new_w = MAX(new_w, c->min_width);
+        if (c->max_height != -1) new_h = MIN(new_h, c->max_height);
+        if (c->min_height != -1) new_h = MAX(new_h, c->min_height);
+
+        resize_client(wm, c, new_w, new_h);
+    }
 }
 
 void wm_loop(wm_t *wm)
@@ -454,6 +625,8 @@ void wm_loop(wm_t *wm)
         switch (event.type)
         {
             case KeyPress: on_key_press(wm, &event.xkey); break;
+            case ButtonPress: on_button_press(wm, &event.xbutton); break;
+            case ButtonRelease: on_button_release(wm, &event.xbutton); break;
 
             // Requests refer to actions that have not yet been executed
             // It's the window manager's duty to either ignore or apply them
@@ -485,7 +658,7 @@ void wm_spawn(wm_t *wm, const wm_arg_t arg)
     if (fork() == 0)
     {
         // By convention, the first argument should be the path to the invoked command
-        execvp((char*) arg.str_array[0], (char**) arg.str_array);
+        execvp((char*) arg.strs[0], (char**) arg.strs);
 
         // If we've reached this point, it means that the call failed!
         // Normally, the program would have been replaced by the new process
@@ -508,17 +681,26 @@ void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
+    client_t *f = space->focused_client;
 
-    if (space->focused_client && space->focused_client->next)
-        focus_client(wm, space, space->focused_client->next);
+    if (space->clients.length > 1)
+    {
+        // Wrap around if you've gone past the limit
+        client_t *next = (f->next ? f->next : space->clients.data);
+        focus_client(wm, space, next);
+    }
 }
 
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
+    client_t *f = space->focused_client;
 
-    if (space->focused_client && space->focused_client->previous)
-        focus_client(wm, space, space->focused_client->previous);
+    if (space->clients.length > 1)
+    {
+        client_t *next = (f->previous ? f->previous : space->clients.tail);
+        focus_client(wm, space, next);
+    }
 }
 
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
@@ -571,6 +753,9 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
     if (!source->focused_client) return;
     client_t *client = source->focused_client;
 
+    if (client == wm->dragged_client)
+        wm->dragged_client = NULL;
+
     // Remove entry from list and add to target
     clients_remove_client(&source->clients, client);
     clients_insert(&target->clients, client);
@@ -585,4 +770,16 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
 
     tile(wm, source);
     tile(wm, target);
+}
+
+void wm_toggle_float(wm_t *wm, const wm_arg_t arg)
+{
+    workspace_t *s = get_workspace(wm);
+    client_t *target = s->focused_client;
+
+    if (target)
+    {
+        target->is_floating = !target->is_floating;
+        tile(wm, s);
+    }
 }
