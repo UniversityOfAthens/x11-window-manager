@@ -154,8 +154,11 @@ static bool should_client_float(wm_t *wm, client_t *c)
 {
     // If the client is fixed in size, float it
     // It does not expect to live inside a tiling window manager
-    if (c->max_width == c->min_width && c->max_height == c->min_height)
+    if (c->max_width != -1 && c->max_width == c->min_width &&
+        c->max_height != -1 && c->max_height == c->min_height)
+    {
         return true;
+    }
 
     Atom type = get_window_prop(wm, c->window, wm->atoms[ATOM_WM_WINDOW_TYPE]);
 
