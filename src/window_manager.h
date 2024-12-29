@@ -34,6 +34,7 @@ typedef struct
     Display *conn;
     Colormap colormap;
 
+    int gap;
     int active_workspace;
     workspace_t workspaces[TOTAL_WORKSPACES];
 
@@ -98,6 +99,7 @@ void wm_quit(wm_t *wm, const wm_arg_t arg);
 
 // The argument represents dx, min and max bound checking will be applied
 void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg);
+void wm_adjust_gap(wm_t *wm, const wm_arg_t arg);
 
 void wm_toggle_float(wm_t *wm, const wm_arg_t arg);
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg);

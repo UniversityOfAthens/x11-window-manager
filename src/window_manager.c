@@ -239,6 +239,7 @@ void wm_setup(wm_t *wm)
     wm->root = DefaultRootWindow(wm->conn);
     wm->is_running = true;
     wm->dragged_client = NULL;
+    wm->gap = WM_INITIAL_GAP;
 
     /*
      * Checking whether we've got a right for Substructure Redirection
@@ -281,7 +282,7 @@ void wm_setup(wm_t *wm)
     wm->colormap = DefaultColormap(wm->conn, screen);
 
     try_load_named_color(wm, "red", &wm->focused_border_color);
-    try_load_named_color(wm, "white", &wm->border_color);
+    try_load_named_color(wm, "black", &wm->border_color);
 
     puts("WM was initialized successfully");
 }
@@ -342,8 +343,8 @@ static void tile(wm_t *wm, workspace_t *space)
 
     if (tiled_clients == 0) return;
 
-    const int max_width = wm->width - 2 * WM_BORDER_WIDTH;
-    const int max_height = wm->height - 2 * WM_BORDER_WIDTH;
+    const int max_width = wm->width - 2 * wm->gap;
+    const int max_height = wm->height - 2 * wm->gap;
 
     // Find the first non-floating window
     client_t *special = space->clients.data;
@@ -351,17 +352,18 @@ static void tile(wm_t *wm, workspace_t *space)
 
     if (tiled_clients == 1)
     {
-        move_and_resize_client(wm, special, 0, 0, max_width, max_height);
+        move_and_resize_client(wm, special, wm->gap, wm->gap, max_width, max_height);
     }
     else
     {
         // The head of the clients list, also known as the special window,
         // will capture a whole pane on its own.
-        move_and_resize_client(wm, special, 0, 0, space->special_width, max_height);
-        const int rem_width = max_width - space->special_width;
+        move_and_resize_client(wm, special, wm->gap, wm->gap, space->special_width, max_height);
+        const int rem_width = max_width - space->special_width - wm->gap;
 
         // The other windows will just share the remaining space
-        int other_height = max_height / (tiled_clients - 1);
+        // x * total + gap * (total - 1) = max_height, solve for x
+        int other_height = (max_height - wm->gap * (tiled_clients - 2)) / (tiled_clients - 1);
         int i = 0;
 
         for (client_t *c = special->next; c; c = c->next)
@@ -369,7 +371,8 @@ static void tile(wm_t *wm, workspace_t *space)
             if (c->is_floating)
                 continue;
 
-            move_and_resize_client(wm, c, space->special_width, i * other_height,
+            move_and_resize_client(wm, c,
+                    space->special_width + 2 * wm->gap, wm->gap + i * (wm->gap + other_height),
                     rem_width, other_height);
             i++;
         }
@@ -388,7 +391,7 @@ static void frame_window(wm_t *wm, Window window)
         wm->conn, wm->root,
         window_attrs.x, window_attrs.y,
         window_attrs.width, window_attrs.height,
-        WM_BORDER_WIDTH, WM_BORDER_COLOR, 0x000000);
+        WM_BORDER_WIDTH, 0x000000, 0x000000);
 
     // The change should be reflected to our internal state
     client_t *client = create_client(frame, window);
@@ -531,15 +534,7 @@ static void on_configure_request(wm_t *wm, const XConfigureRequestEvent *event)
         .stack_mode = event->detail,
     };
 
-    workspace_t *space = get_workspace(wm);
-    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
-
-    if (client)
-    {
-        // Something might be wrong, this never gets called
-        puts("this is a window I'm managing");
-    }
-
+    // TODO: Should all requests be allowed?
     XConfigureWindow(wm->conn, event->window, event->value_mask, &changes);
 }
 
@@ -679,12 +674,19 @@ void wm_spawn(wm_t *wm, const wm_arg_t arg)
 void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
+    const int padding = 40;
 
     int new_width = space->special_width + arg.amount;
-    if (new_width < WM_SPECIAL_PADDING || new_width > wm->width - WM_SPECIAL_PADDING) return;
+    if (new_width < padding || new_width > wm->width - 2 * wm->gap - padding) return;
 
     space->special_width = new_width;
     tile(wm, space);
+}
+
+void wm_adjust_gap(wm_t *wm, const wm_arg_t arg)
+{
+    wm->gap = MAX(0, wm->gap + arg.amount);
+    tile(wm, get_workspace(wm));
 }
 
 // This is once again inspired by dwm and vim

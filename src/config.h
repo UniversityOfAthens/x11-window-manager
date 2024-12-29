@@ -8,8 +8,7 @@
 #define WM_MOD_MASK Mod4Mask
 
 #define WM_BORDER_WIDTH 1
-#define WM_BORDER_COLOR 0xffffff
-#define WM_SPECIAL_PADDING 50
+#define WM_INITIAL_GAP 10
 
 #define SWITCH_WORK(k, n)                                                  \
     { {WM_MOD_MASK, k}, wm_switch_to_workspace, {.amount = n} },           \
@@ -22,8 +21,6 @@
 static wm_key_t wm_kill_client_key = { WM_MOD_MASK | ShiftMask, XK_q };
 
 static wm_binding_t wm_bindings[] = {
-    { {WM_MOD_MASK,             XK_p}, wm_spawn, SHELL("dmenu_run") },
-    { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, SHELL("xterm") },
     { {WM_MOD_MASK | ShiftMask, XK_e}, wm_quit, NULL },
 
     { {WM_MOD_MASK, XK_l}, wm_adjust_special_width, {.amount = 20} },
@@ -38,11 +35,25 @@ static wm_binding_t wm_bindings[] = {
     SWITCH_WORK(XK_7, 6), SWITCH_WORK(XK_8, 7), SWITCH_WORK(XK_9, 8),
 
     { {WM_MOD_MASK, XK_t}, wm_toggle_float },
+    { {WM_MOD_MASK, XK_equal}, wm_adjust_gap, {.amount = 1} },
+    { {WM_MOD_MASK, XK_minus}, wm_adjust_gap, {.amount = -1} },
 
     // Audio volume controls
     { {0, XF86XK_AudioLowerVolume}, wm_spawn, SHELL("pactl set-sink-volume 0 -5%") },
     { {0, XF86XK_AudioRaiseVolume}, wm_spawn, SHELL("pactl set-sink-volume 0 +5%") },
     { {0, XF86XK_AudioMute},        wm_spawn, SHELL("pactl set-sink-mute 0 toggle") },
+
+    // Some personal stuff here, I'm starting to daily-drive this
+    // You can bind keys to personal shell scripts, it's really powerful!
+    { {WM_MOD_MASK,             XK_p}, wm_spawn, SHELL("dmenu_run") },
+    { {WM_MOD_MASK,             XK_b}, wm_spawn, SHELL("firefox") },
+    { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, SHELL("alacritty") },
+
+    { {WM_MOD_MASK|ShiftMask, XK_p}, wm_spawn, SHELL("passmenu") },
+    { {WM_MOD_MASK,           XK_s}, wm_spawn, SHELL("~/.config/scripts/prompt_bookmarks.sh") },
+    { {WM_MOD_MASK|ShiftMask, XK_s}, wm_spawn, SHELL("~/.config/scripts/take_screenshot.sh") },
+    // Το κουμπί με το αεροπλάνο...
+    { {0, XK_F12}, wm_spawn, SHELL("feh -Z ~/images/xergias.jpg") },
 };
 
 #endif
