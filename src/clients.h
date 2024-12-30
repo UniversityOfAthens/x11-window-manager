@@ -23,14 +23,25 @@ typedef struct client_t
     struct client_t *previous;
 } client_t;
 
+typedef struct focus_stack_t
+{
+    client_t *client;
+    struct focus_stack_t *next;
+} focus_stack_t;
+
 typedef struct
 {
-    client_t *data;
+    client_t *head;
     // Storing last item for faster access
     client_t *tail;
-
     int length;
+
+    // We need some sort of memory of previously focused windows.
+    // Predictability is important, and the user is expecting stack-like behaviour
+    focus_stack_t *focus_stack;
 } client_list_t;
+
+void clients_initialize(client_list_t *list);
 
 void clients_insert(client_list_t *list, client_t *client);
 // NOTE: Will just remove it from the list, you need to destroy it yourself!
@@ -47,7 +58,13 @@ typedef enum
 } client_window_e;
 
 // Returns NULL upon search failure
-client_t* clients_find_by_window(const client_list_t list,
+client_t* clients_find_by_window(const client_list_t *list,
                                  Window window, client_window_e type);
+
+client_t* clients_get_focused(client_list_t *list);
+
+// Will automatically resurface old entry if it already exists
+void clients_push_focus(client_list_t *list, client_t *c);
+void clients_remove_focus(client_list_t *list, client_t *c);
 
 #endif

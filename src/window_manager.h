@@ -23,7 +23,6 @@ typedef enum
 typedef struct
 {
     client_list_t clients;
-    client_t *focused_client;
 
     // The width of the special window, initially set to half the screen width
     int special_width;
@@ -99,6 +98,7 @@ void wm_quit(wm_t *wm, const wm_arg_t arg);
 
 // The argument represents dx, min and max bound checking will be applied
 void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg);
+void wm_reset_special_width(wm_t *wm, const wm_arg_t arg);
 void wm_adjust_gap(wm_t *wm, const wm_arg_t arg);
 
 void wm_toggle_float(wm_t *wm, const wm_arg_t arg);

@@ -77,8 +77,8 @@ server events that are currently waiting to be processed by the
 client. Every client will allocate space for an event queue for each
 server that it is currently connected to.
 
-The server manages a set of **resources**, which it then exposes
-using simple integer IDs. If any client knows the ID of a resource,
+The server manages a set of **resources**, which it then exposes using
+simple integer IDs. If any client has access to the ID of a resource,
 they can freely manipulate it even if some other client had initially
 created it. This is how window managers are implemented: they can move
 and resize applications because they know their IDs.
@@ -93,7 +93,7 @@ special key bindings. Although this might initially seem annoying, it
 makes total sense in practice since you won't have to deal with
 overlapping windows ever again!
 
-A window manager is also responsible for defining the desktop's
+A window manager is also responsible of defining the desktop's
 appearance. Some window managers, such as i3, will ship with
 decorative title bars by default. Others, such as dwm, prefer to
 minimize visual clutter, restricting themselves to just a single
@@ -155,7 +155,7 @@ defined through calls to `XGrabKey` on our root window, during setup.
 Keycodes are just integer identifiers used to represent a particular
 key position on the keyboard. They are completely ignorant of the
 key's content. That's why you should prefer working with KeySyms,
-which represent characters in a portable, cross-keyboard fashion
+which define characters in a portable, cross-keyboard representation
 (`XK_a`, `XK_space` and so on). Most Xlib routines require a keycode,
 so a call to `XkbKeycodeToKeysym` is required. Note that
 `XKeycodeToKeysym` is deprecated.
@@ -197,7 +197,11 @@ property of our root window up to date at all times. The
 case. We'll just provide a single argument of type `XA_WINDOW`.
 
 We should also focus on windows that have just been hovered by the
-cursor, which is done using `EnterNotify` events.
+cursor, which is done using `EnterNotify` events. Internally, the
+window manager is using a "focus stack", because that's what the user
+expects when creating windows. Deleting a floating window previously
+created by a parent window should focus back on the parent: That's
+what a stack is best for!
 
 #### Colormaps and Border Color
 
@@ -212,7 +216,7 @@ nickname (e.g. "red") into an exact RGB value. Then, once the RGB
 value is known, it will allocate a color on the provided colormap and
 return an `XColor` structure, containing the associated colormap index
 (held in the `pixel` field) which can finally be used to modify the
-color of some graphical elements (including window borders).
+color of our graphical elements (including window borders).
 
 ## Layout Policy
 
@@ -231,11 +235,11 @@ the X server most often failed to make it visible before our
 ## Workspace Switching
 
 Each workspace must only keep track of its clients, along with its
-active layout configuration and a pointer to the client currently in
-focus. When switching between workspaces, we just need to iterate over
-the active client list and unmap (not destroy!) every single frame
-window. Unmapping is recursive, so the underlying windows will
-immediately become invisible as well.
+active layout configuration and its focus stack. When switching
+between workspaces, we just need to iterate over the active client
+list and unmap (not destroy!) every single frame window. Unmapping is
+recursive, so the underlying windows will immediately become invisible
+as well.
 
 ## Floating Windows
 

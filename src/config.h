@@ -22,6 +22,7 @@ static wm_key_t wm_kill_client_key = { WM_MOD_MASK | ShiftMask, XK_q };
 
 static wm_binding_t wm_bindings[] = {
     { {WM_MOD_MASK | ShiftMask, XK_e}, wm_quit, NULL },
+    { {WM_MOD_MASK, XK_equal}, wm_reset_special_width },
 
     { {WM_MOD_MASK, XK_l}, wm_adjust_special_width, {.amount = 20} },
     { {WM_MOD_MASK, XK_h}, wm_adjust_special_width, {.amount = -20} },
@@ -35,7 +36,7 @@ static wm_binding_t wm_bindings[] = {
     SWITCH_WORK(XK_7, 6), SWITCH_WORK(XK_8, 7), SWITCH_WORK(XK_9, 8),
 
     { {WM_MOD_MASK, XK_t}, wm_toggle_float },
-    { {WM_MOD_MASK, XK_equal}, wm_adjust_gap, {.amount = 1} },
+    { {WM_MOD_MASK | ShiftMask, XK_equal}, wm_adjust_gap, {.amount = 1} },
     { {WM_MOD_MASK, XK_minus}, wm_adjust_gap, {.amount = -1} },
 
     // Audio volume controls
@@ -49,9 +50,9 @@ static wm_binding_t wm_bindings[] = {
     { {WM_MOD_MASK,             XK_b}, wm_spawn, SHELL("firefox") },
     { {WM_MOD_MASK | ShiftMask, XK_Return}, wm_spawn, SHELL("alacritty") },
 
-    { {WM_MOD_MASK|ShiftMask, XK_p}, wm_spawn, SHELL("passmenu") },
-    { {WM_MOD_MASK,           XK_s}, wm_spawn, SHELL("~/.config/scripts/prompt_bookmarks.sh") },
-    { {WM_MOD_MASK|ShiftMask, XK_s}, wm_spawn, SHELL("~/.config/scripts/take_screenshot.sh") },
+    { {WM_MOD_MASK | ShiftMask, XK_p}, wm_spawn, SHELL("passmenu") },
+    { {WM_MOD_MASK,            XK_s},  wm_spawn, SHELL("~/.config/scripts/prompt_bookmarks.sh") },
+    { {WM_MOD_MASK | ShiftMask, XK_s}, wm_spawn, SHELL("~/.config/scripts/take_screenshot.sh") },
     // Το κουμπί με το αεροπλάνο...
     { {0, XK_F12}, wm_spawn, SHELL("feh -Z ~/images/xergias.jpg") },
 };

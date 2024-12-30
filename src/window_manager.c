@@ -81,7 +81,7 @@ static void create_bindings(wm_t *wm)
     }
 }
 
-// Will return false if the client does not participate in the protocol (x_notes.md)
+// Will return false if the client does not participate in the protocol (README.md)
 static bool try_send_wm_protocol(wm_t *wm, Window window, Atom protocol)
 {
     bool is_supported = false;
@@ -178,25 +178,15 @@ static bool should_client_float(wm_t *wm, client_t *c)
     return false;
 }
 
-// Sounds like a magic trick
-static void unfocus_focused(wm_t *wm, workspace_t *space)
+static void visually_reflect_focus(wm_t *wm, workspace_t *space)
 {
-    // The previously focused window's border must be reset 
-    if (space->focused_client)
-        XSetWindowBorder(wm->conn, space->focused_client->frame, wm->border_color.pixel);
-}
-
-// Call with NULL to clear focus
-static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
-{
-    unfocus_focused(wm, space);
+    client_t *c = clients_get_focused(&space->clients);
 
     if (!c)
     {
         XSetInputFocus(wm->conn, wm->root, RevertToPointerRoot, CurrentTime);
         // Clear the property so that clients understand that no window is currently in focus
         XDeleteProperty(wm->conn, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW]);
-        space->focused_client = NULL;
     }
     else
     {
@@ -206,8 +196,26 @@ static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
         // The server will generate FocusIn and FocusOut events
         XSetInputFocus(wm->conn, c->window, RevertToPointerRoot, CurrentTime);
         try_send_wm_protocol(wm, c->window, wm->atoms[ATOM_WM_TAKE_FOCUS]);
-        space->focused_client = c;
     }
+}
+
+// Sounds like a magic trick
+static void visually_unfocus_focused(wm_t *wm, workspace_t *space)
+{
+    client_t *c = clients_get_focused(&space->clients);
+
+    if (c)
+        XSetWindowBorder(wm->conn, c->frame, wm->border_color.pixel);
+}
+
+static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
+{
+    client_t *cur = clients_get_focused(&space->clients);
+    if (cur == c) return;
+
+    visually_unfocus_focused(wm, space);
+    clients_push_focus(&space->clients, c);
+    visually_reflect_focus(wm, space);
 }
 
 static void try_load_named_color(wm_t *wm, const char *id, XColor *color)
@@ -272,9 +280,7 @@ void wm_setup(wm_t *wm)
     for (int i = 0; i < TOTAL_WORKSPACES; i++)
     {
         wm->workspaces[i].special_width = wm->width / 2;
-        wm->workspaces[i].clients.data = NULL;
-        wm->workspaces[i].clients.length = 0;
-        wm->workspaces[i].focused_client = NULL;
+        clients_initialize(&wm->workspaces[i].clients);
     }
     wm->active_workspace = 0;
 
@@ -292,10 +298,6 @@ static void get_size_hints(wm_t *wm, client_t *c)
     XSizeHints hints;
     // We can ignore this value safely
     long supplied_return;
-
-    // Initialize everything to negative one to mark them as disabled
-    c->min_width = c->max_width = -1;
-    c->min_height = c->max_height = -1;
 
     if (XGetWMNormalHints(wm->conn, c->window, &hints, &supplied_return))
     {
@@ -338,7 +340,7 @@ static void tile(wm_t *wm, workspace_t *space)
 
     // Do not consider floating windows
     int tiled_clients = 0;
-    for (client_t *c = space->clients.data; c; c = c->next)
+    for (client_t *c = space->clients.head; c; c = c->next)
         tiled_clients += (!c->is_floating);
 
     if (tiled_clients == 0) return;
@@ -347,7 +349,7 @@ static void tile(wm_t *wm, workspace_t *space)
     const int max_height = wm->height - 2 * wm->gap;
 
     // Find the first non-floating window
-    client_t *special = space->clients.data;
+    client_t *special = space->clients.head;
     while (special->is_floating) special = special->next;
 
     if (tiled_clients == 1)
@@ -356,7 +358,7 @@ static void tile(wm_t *wm, workspace_t *space)
     }
     else
     {
-        // The head of the clients list, also known as the special window,
+        // The non-floating head of the clients list, also known as the special window,
         // will capture a whole pane on its own.
         move_and_resize_client(wm, special, wm->gap, wm->gap, space->special_width, max_height);
         const int rem_width = max_width - space->special_width - wm->gap;
@@ -379,7 +381,7 @@ static void tile(wm_t *wm, workspace_t *space)
     }
 }
 
-static void frame_window(wm_t *wm, Window window)
+static client_t* frame_window(wm_t *wm, Window window)
 {
     workspace_t *space = get_workspace(wm);
 
@@ -427,12 +429,14 @@ static void frame_window(wm_t *wm, Window window)
     XGrabButton(wm->conn, Button3, WM_MOD_MASK, window, false,
             ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
             GrabModeAsync, GrabModeAsync, None, None);
+
+    return client;
 }
 
 /*
  * Carefully ignore the errors instead of attempting to asynchronously
  * determine if a window is still valid. This is a common pattern in many WM
- * implementations. That's because the window might have already completely destroyed
+ * implementations. That's because the window might have already destroyed
  * itself before the initial Unmap event arrives at our end.
  */
 static void unframe_client(wm_t *wm, client_t *client)
@@ -451,10 +455,11 @@ static void unframe_client(wm_t *wm, client_t *client)
     if (client == wm->dragged_client)
         wm->dragged_client = NULL;
 
-    if (space->focused_client == client)
-        focus_client(wm, space, client->previous ? client->previous : client->next);
-
-    clients_destroy_client(&space->clients, client);
+    if (clients_get_focused(&space->clients) == client)
+    {
+        clients_destroy_client(&space->clients, client);
+        visually_reflect_focus(wm, space);
+    }
 
     XSync(wm->conn, false);
     XSetErrorHandler(on_x_error);
@@ -464,7 +469,7 @@ static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
 {
     workspace_t *space = get_workspace(wm);
     // First, ensure that the unmapped window is actually a client that we manage
-    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
+    client_t *client = clients_find_by_window(&space->clients, event->window, CLIENT_WINDOW);
 
     if (!client)
         return;
@@ -511,13 +516,12 @@ static void on_map_request(wm_t *wm, const XMapRequestEvent *event)
 {
     workspace_t *space = get_workspace(wm);
 
-    frame_window(wm, event->window);
+    client_t *c = frame_window(wm, event->window);
     XMapWindow(wm->conn, event->window);
 
     // Wait until the mapping request is done, and only then change focus!
-    // The new window will always be the root of our list
     XSync(wm->conn, false);
-    focus_client(wm, space, space->clients.data);
+    focus_client(wm, space, c);
 
     tile(wm, space);
 }
@@ -544,8 +548,8 @@ static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
     workspace_t *space = get_workspace(wm);
 
     // Frames are top-level, we should be searching for those
-    client_t *client = clients_find_by_window(space->clients, event->window, CLIENT_FRAME);
-
+    client_t *client = clients_find_by_window(&space->clients, event->window, CLIENT_FRAME);
+    
     if (client)
         focus_client(wm, space, client);
 }
@@ -557,7 +561,7 @@ static void on_button_press(wm_t *wm, const XButtonEvent *event)
      * to be storing the initial position and size as a reference point. 
      */
     workspace_t *space = get_workspace(wm);
-    client_t *c = clients_find_by_window(space->clients, event->window, CLIENT_WINDOW);
+    client_t *c = clients_find_by_window(&space->clients, event->window, CLIENT_WINDOW);
     if (!c)
         return;
 
@@ -593,10 +597,10 @@ static void on_button_release(wm_t *wm, const XButtonEvent *event)
 static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
 {
     wm->has_moved_cursor = true;
-    if (!wm->dragged_client)
-        return;
-
     client_t *c = wm->dragged_client;
+
+    if (!c)
+        return;
 
     // The user is trying to move the window
     if (event->state & Button1Mask)
@@ -610,7 +614,7 @@ static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
         int new_w = wm->drag_window_w + (event->x_root - wm->drag_cursor_x);
         int new_h = wm->drag_window_h + (event->y_root - wm->drag_cursor_y);
 
-        // If the client has an explicit maximum size, respect it
+        // If the client has an explicit size range, respect it
         if (c->max_width != -1) new_w = MIN(new_w, c->max_width);
         if (c->min_width != -1) new_w = MAX(new_w, c->min_width);
         if (c->max_height != -1) new_h = MIN(new_h, c->max_height);
@@ -683,6 +687,17 @@ void wm_adjust_special_width(wm_t *wm, const wm_arg_t arg)
     tile(wm, space);
 }
 
+void wm_reset_special_width(wm_t *wm, const wm_arg_t arg)
+{
+    workspace_t *space = get_workspace(wm);
+
+    if (space->special_width != wm->width / 2)
+    {
+        space->special_width = wm->width / 2;
+        tile(wm, space);
+    }
+}
+
 void wm_adjust_gap(wm_t *wm, const wm_arg_t arg)
 {
     wm->gap = MAX(0, wm->gap + arg.amount);
@@ -693,12 +708,12 @@ void wm_adjust_gap(wm_t *wm, const wm_arg_t arg)
 void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
-    client_t *f = space->focused_client;
+    client_t *f = clients_get_focused(&space->clients);
 
     if (space->clients.length > 1)
     {
         // Wrap around if you've gone past the limit
-        client_t *next = (f->next ? f->next : space->clients.data);
+        client_t *next = (f->next ? f->next : space->clients.head);
         focus_client(wm, space, next);
     }
 }
@@ -706,7 +721,7 @@ void wm_focus_on_next(wm_t *wm, const wm_arg_t arg)
 void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
-    client_t *f = space->focused_client;
+    client_t *f = clients_get_focused(&space->clients);
 
     if (space->clients.length > 1)
     {
@@ -718,7 +733,7 @@ void wm_focus_on_previous(wm_t *wm, const wm_arg_t arg)
 void wm_make_focused_special(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *space = get_workspace(wm);
-    client_t *f = space->focused_client;
+    client_t *f = clients_get_focused(&space->clients);
 
     if (f && !f->is_floating && space->clients.length > 1)
     {
@@ -736,7 +751,7 @@ void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
     workspace_t *space = get_workspace(wm);
 
     // Unmap all clients in the current workspace, making them temporarily invisible
-    for (client_t *c = space->clients.data; c; c = c->next)
+    for (client_t *c = space->clients.head; c; c = c->next)
     {
         XUnmapWindow(wm->conn, c->frame);
     }
@@ -746,13 +761,13 @@ void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
     wm->has_moved_cursor = false;
     space = get_workspace(wm);
 
-    for (client_t *c = space->clients.data; c; c = c->next)
+    for (client_t *c = space->clients.head; c; c = c->next)
     {
         XMapWindow(wm->conn, c->frame);
     }
 
     // Focus back on the window that was active last time we left
-    focus_client(wm, space, space->focused_client);
+    visually_reflect_focus(wm, space);
 }
 
 // Send the application currently in focus to the provided workspace
@@ -762,9 +777,9 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
     workspace_t *source = get_workspace(wm);
     workspace_t *target = &wm->workspaces[arg.amount];
 
+    client_t *client = clients_get_focused(&source->clients);
     // If no client is currently focused, ignore
-    if (!source->focused_client) return;
-    client_t *client = source->focused_client;
+    if (!client) return;
 
     if (client == wm->dragged_client)
         wm->dragged_client = NULL;
@@ -773,13 +788,15 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
     clients_remove_client(&source->clients, client);
     clients_insert(&target->clients, client);
         
-    // The window is gone, focus on special and make the old one invisible
-    focus_client(wm, source, source->clients.data);
+    // The window is gone, focus on the next one on the stack
+    clients_remove_focus(&source->clients, client);
+    visually_reflect_focus(wm, source);
+
     XUnmapWindow(wm->conn, client->frame);
     // WARNING: We don't want to focus_client since the window is currently unmapped
     // If you try to do this, X11 will explode
-    unfocus_focused(wm, target);
-    target->focused_client = client;
+    visually_unfocus_focused(wm, target);
+    clients_push_focus(&target->clients, client);
 
     tile(wm, source);
     tile(wm, target);
@@ -788,7 +805,7 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
 void wm_toggle_float(wm_t *wm, const wm_arg_t arg)
 {
     workspace_t *s = get_workspace(wm);
-    client_t *target = s->focused_client;
+    client_t *target = clients_get_focused(&s->clients);
 
     if (target)
     {
