@@ -119,6 +119,8 @@ static focus_stack_t* remove_from_focus(client_list_t *list, client_t *c)
             prev->next = f->next;
             return f;
         }
+
+        prev = f;
     }
 
     return NULL;
