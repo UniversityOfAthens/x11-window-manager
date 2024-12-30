@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
-client_t* create_client(Window frame, Window window)
+client_t* create_client(Window window)
 {
     client_t *c = malloc(sizeof(client_t));
     if (!c)
@@ -12,7 +12,6 @@ client_t* create_client(Window frame, Window window)
     c->previous = NULL;
     c->next = NULL;
     c->window = window;
-    c->frame = frame;
     // Initialize everything to negative one to mark them as disabled
     c->min_width = c->max_width = -1;
     c->min_height = c->max_height = -1;
@@ -72,21 +71,15 @@ void clients_destroy_client(client_list_t *list, client_t *client)
     free(client);
 }
 
-client_t* clients_find_by_window(const client_list_t *list,
-                                 Window window, client_window_e type)
+client_t* clients_find_by_window(const client_list_t *list, Window window)
 {
     if (list->head == NULL)
         return NULL;
 
     // Just return the first match, performing a linear search
     for (client_t *c = list->head; c != NULL; c = c->next)
-    {
-        if ((type == CLIENT_WINDOW && c->window == window) ||
-            (type == CLIENT_FRAME && c->frame == window))
-        {
+        if (c->window == window)
             return c;
-        }
-    }
 
     return NULL;
 }

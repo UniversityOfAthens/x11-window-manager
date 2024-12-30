@@ -11,7 +11,6 @@
  */
 typedef struct client_t
 {
-    Window frame;
     Window window;
     bool is_floating;
 
@@ -49,17 +48,10 @@ void clients_remove_client(client_list_t *list, client_t *client);
 // Will remove from list and then actually free up the resources
 void clients_destroy_client(client_list_t *list, client_t *client);
 
-client_t* create_client(Window frame, Window window);
-
-typedef enum
-{
-    CLIENT_FRAME,
-    CLIENT_WINDOW,
-} client_window_e;
+client_t* create_client(Window window);
 
 // Returns NULL upon search failure
-client_t* clients_find_by_window(const client_list_t *list,
-                                 Window window, client_window_e type);
+client_t* clients_find_by_window(const client_list_t *list, Window window);
 
 client_t* clients_get_focused(client_list_t *list);
 

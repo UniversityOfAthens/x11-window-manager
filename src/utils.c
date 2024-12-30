@@ -16,4 +16,3 @@ void log_fatal(const char *format, ...)
     va_end(args);
     exit(EXIT_FAILURE);
 }
-

@@ -190,7 +190,7 @@ static void visually_reflect_focus(wm_t *wm, workspace_t *space)
     }
     else
     {
-        XSetWindowBorder(wm->conn, c->frame, wm->focused_border_color.pixel);
+        XSetWindowBorder(wm->conn, c->window, wm->focused_border_color.pixel);
 
         set_window_prop(wm, wm->root, wm->atoms[ATOM_NET_ACTIVE_WINDOW], XA_WINDOW, &c->window, 1);
         // The server will generate FocusIn and FocusOut events
@@ -205,7 +205,7 @@ static void visually_unfocus_focused(wm_t *wm, workspace_t *space)
     client_t *c = clients_get_focused(&space->clients);
 
     if (c)
-        XSetWindowBorder(wm->conn, c->frame, wm->border_color.pixel);
+        XSetWindowBorder(wm->conn, c->window, wm->border_color.pixel);
 }
 
 static void focus_client(wm_t *wm, workspace_t *space, client_t *c)
@@ -314,20 +314,6 @@ static void get_size_hints(wm_t *wm, client_t *c)
     }
 }
 
-// Should be prefered when only resizing is needed
-static void resize_client(wm_t *wm, client_t *c, int w, int h)
-{
-    XResizeWindow(wm->conn, c->frame, w, h);
-    XResizeWindow(wm->conn, c->window, w, h);
-}
-
-static void move_and_resize_client(wm_t *wm, client_t *c, int x, int y, int w, int h)
-{
-    XMoveResizeWindow(wm->conn, c->frame, x, y, w, h);
-    // The x-y position is relative to that of the parent
-    XMoveResizeWindow(wm->conn, c->window, 0, 0, w, h);
-}
-
 /*
  * Re-calculate all tiling positions in a single workspace
  * This should generally be called after ground-breaking layout changes
@@ -354,13 +340,13 @@ static void tile(wm_t *wm, workspace_t *space)
 
     if (tiled_clients == 1)
     {
-        move_and_resize_client(wm, special, wm->gap, wm->gap, max_width, max_height);
+        XMoveResizeWindow(wm->conn, special->window, wm->gap, wm->gap, max_width, max_height);
     }
     else
     {
         // The non-floating head of the clients list, also known as the special window,
         // will capture a whole pane on its own.
-        move_and_resize_client(wm, special, wm->gap, wm->gap, space->special_width, max_height);
+        XMoveResizeWindow(wm->conn, special->window, wm->gap, wm->gap, space->special_width, max_height);
         const int rem_width = max_width - space->special_width - wm->gap;
 
         // The other windows will just share the remaining space
@@ -373,7 +359,7 @@ static void tile(wm_t *wm, workspace_t *space)
             if (c->is_floating)
                 continue;
 
-            move_and_resize_client(wm, c,
+            XMoveResizeWindow(wm->conn, c->window,
                     space->special_width + 2 * wm->gap, wm->gap + i * (wm->gap + other_height),
                     rem_width, other_height);
             i++;
@@ -381,44 +367,32 @@ static void tile(wm_t *wm, workspace_t *space)
     }
 }
 
-static client_t* frame_window(wm_t *wm, Window window)
+static client_t* manage_window(wm_t *wm, Window window)
 {
     workspace_t *space = get_workspace(wm);
 
-    // Fetch the window's attributes so that we can create a matching frame with a border
-    XWindowAttributes window_attrs;
-    XGetWindowAttributes(wm->conn, window, &window_attrs);
-
-    const Window frame = XCreateSimpleWindow(
-        wm->conn, wm->root,
-        window_attrs.x, window_attrs.y,
-        window_attrs.width, window_attrs.height,
-        WM_BORDER_WIDTH, 0x000000, 0x000000);
-
-    // The change should be reflected to our internal state
-    client_t *client = create_client(frame, window);
+    // Start tracking the window inside our internal state
+    client_t *client = create_client(window);
     clients_insert(&space->clients, client);
 
-    /*
-     * Forward substructure (geometry, configuration) events of child window to frame,
-     * so that they're collected by the root which has enabled substructure
-     * redirection. (at least that's my interpretation!)
-     */
-    XSelectInput(wm->conn, frame, SubstructureNotifyMask | EnterWindowMask);
+    // Create a border around the window to indicate whether it's focused
+    XWindowChanges wc = { .border_width = WM_BORDER_WIDTH };
+    XConfigureWindow(wm->conn, window, CWBorderWidth, &wc);
+
+    XSelectInput(wm->conn, window, EnterWindowMask);
 
     // Stores the list of all client windows managed by the window manager
     // This information is important, particularly during window-manager cleanup
     XAddToSaveSet(wm->conn, window);
 
-    XReparentWindow(wm->conn, window, frame, 0, 0);
-    // The frame needs to be mapped as well
-    // Any mapped child with an unmapped ancestor will behave as if unmapped
-    XMapWindow(wm->conn, frame);
-
     get_size_hints(wm, client);
     client->is_floating = should_client_float(wm, client);
 
-    // Register possible bindings
+    /*
+     * Registering some special key bindings
+     * These are unique in some way and do not follow the conventions of config.h
+     */
+
     grab_key(wm, wm_kill_client_key, window);
 
     // Capture move and resize bindings
@@ -439,27 +413,21 @@ static client_t* frame_window(wm_t *wm, Window window)
  * implementations. That's because the window might have already destroyed
  * itself before the initial Unmap event arrives at our end.
  */
-static void unframe_client(wm_t *wm, client_t *client)
+static void unmanage_client(wm_t *wm, client_t *client)
 {
     workspace_t *space = get_workspace(wm);
     XSetErrorHandler(dummy_error_handler);
 
-    // Unmap frame and reparent window
-    XUnmapWindow(wm->conn, client->frame);
-    XReparentWindow(wm->conn, client->window, wm->root, 0, 0);
     // Remove client from save set, we don't have to deal with them anymore
     XRemoveFromSaveSet(wm->conn, client->window);
-    // Destroy frame and delete client entry from state
-    XDestroyWindow(wm->conn, client->frame);
+    // Destroy window and delete client entry from state
+    XDestroyWindow(wm->conn, client->window);
+
+    clients_destroy_client(&space->clients, client);
+    visually_reflect_focus(wm, space);
 
     if (client == wm->dragged_client)
         wm->dragged_client = NULL;
-
-    if (clients_get_focused(&space->clients) == client)
-    {
-        clients_destroy_client(&space->clients, client);
-        visually_reflect_focus(wm, space);
-    }
 
     XSync(wm->conn, false);
     XSetErrorHandler(on_x_error);
@@ -469,16 +437,19 @@ static void on_unmap_notify(wm_t *wm, const XUnmapEvent *event)
 {
     workspace_t *space = get_workspace(wm);
     // First, ensure that the unmapped window is actually a client that we manage
-    client_t *client = clients_find_by_window(&space->clients, event->window, CLIENT_WINDOW);
+    client_t *client = clients_find_by_window(&space->clients, event->window);
 
     if (!client)
         return;
 
-    // The window is invisible, so get rid of the frame
-    // Since minimized windows will not be supported, unmap is pretty much identical to destruction
-    // We might unmap frame windows during workspace switching,
-    //   but notice that we won't reach this line of code
-    unframe_client(wm, client);
+    /*
+     * The window is invisible, so get rid of it. Since minimized windows will
+     * not be supported, unmap is pretty much identical to destruction
+     *
+     * Workspace switching will thankfully never reach this line, since the
+     * window does not belong on the current workspace anymore.
+     */
+    unmanage_client(wm, client);
     tile(wm, space);
 }
 
@@ -509,14 +480,14 @@ static void on_key_press(wm_t *wm, const XKeyEvent *event)
 }
 
 /*
- * A window requests to be mapped, so get ready for it being visible.
- * We need to enclose the window in a decorative frame (title bar, border)
+ * A toplevel window (substructure redirection) requests to be mapped
+ * Map it and start keeping track of it
  */
 static void on_map_request(wm_t *wm, const XMapRequestEvent *event)
 {
     workspace_t *space = get_workspace(wm);
 
-    client_t *c = frame_window(wm, event->window);
+    client_t *c = manage_window(wm, event->window);
     XMapWindow(wm->conn, event->window);
 
     // Wait until the mapping request is done, and only then change focus!
@@ -547,8 +518,7 @@ static void on_enter_notify(wm_t *wm, const XCrossingEvent *event)
     if (!wm->has_moved_cursor) return;
     workspace_t *space = get_workspace(wm);
 
-    // Frames are top-level, we should be searching for those
-    client_t *client = clients_find_by_window(&space->clients, event->window, CLIENT_FRAME);
+    client_t *client = clients_find_by_window(&space->clients, event->window);
     
     if (client)
         focus_client(wm, space, client);
@@ -561,7 +531,7 @@ static void on_button_press(wm_t *wm, const XButtonEvent *event)
      * to be storing the initial position and size as a reference point. 
      */
     workspace_t *space = get_workspace(wm);
-    client_t *c = clients_find_by_window(&space->clients, event->window, CLIENT_WINDOW);
+    client_t *c = clients_find_by_window(&space->clients, event->window);
     if (!c)
         return;
 
@@ -571,14 +541,14 @@ static void on_button_press(wm_t *wm, const XButtonEvent *event)
     Window root;
     unsigned int border_width, depth;
 
-    if (!XGetGeometry(wm->conn, c->frame, &root,
+    if (!XGetGeometry(wm->conn, c->window, &root,
             &wm->drag_window_x, &wm->drag_window_y,
             &wm->drag_window_w, &wm->drag_window_h, &border_width, &depth))
     {
         log_fatal("failed to fetch geometry of client during button press");
     }
 
-    XRaiseWindow(wm->conn, c->frame);
+    XRaiseWindow(wm->conn, c->window);
     wm->dragged_client = c;
 
     // The window should now be floating if it isn't already
@@ -605,7 +575,7 @@ static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
     // The user is trying to move the window
     if (event->state & Button1Mask)
     {
-        XMoveWindow(wm->conn, c->frame,
+        XMoveWindow(wm->conn, c->window,
             wm->drag_window_x + (event->x_root - wm->drag_cursor_x),
             wm->drag_window_y + (event->y_root - wm->drag_cursor_y));
     }
@@ -620,7 +590,10 @@ static void on_motion_notify(wm_t *wm, const XMotionEvent *event)
         if (c->max_height != -1) new_h = MIN(new_h, c->max_height);
         if (c->min_height != -1) new_h = MAX(new_h, c->min_height);
 
-        resize_client(wm, c, new_w, new_h);
+        new_w = MAX(5, new_w);
+        new_h = MAX(5, new_h);
+
+        XResizeWindow(wm->conn, c->window, new_w, new_h);
     }
 }
 
@@ -753,7 +726,7 @@ void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
     // Unmap all clients in the current workspace, making them temporarily invisible
     for (client_t *c = space->clients.head; c; c = c->next)
     {
-        XUnmapWindow(wm->conn, c->frame);
+        XUnmapWindow(wm->conn, c->window);
     }
 
     wm->active_workspace = arg.amount;
@@ -763,7 +736,7 @@ void wm_switch_to_workspace(wm_t *wm, const wm_arg_t arg)
 
     for (client_t *c = space->clients.head; c; c = c->next)
     {
-        XMapWindow(wm->conn, c->frame);
+        XMapWindow(wm->conn, c->window);
     }
 
     // Focus back on the window that was active last time we left
@@ -792,7 +765,7 @@ void wm_send_to_workspace(wm_t *wm, const wm_arg_t arg)
     clients_remove_focus(&source->clients, client);
     visually_reflect_focus(wm, source);
 
-    XUnmapWindow(wm->conn, client->frame);
+    XUnmapWindow(wm->conn, client->window);
     // WARNING: We don't want to focus_client since the window is currently unmapped
     // If you try to do this, X11 will explode
     visually_unfocus_focused(wm, target);

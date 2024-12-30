@@ -139,6 +139,11 @@ border and a window title. It would have been illogical to target
 non-top-level windows, since these are nothing more than buttons,
 scroll bars, input fields etc.
 
+> This window manager is extremely lightweight, so we won't need
+> entire frame windows. We'll just modify the top-level window's
+> border. You can check out the repository's git history for a frame
+> implementation, but that's now gone.
+
 `SubstructureNotifyMask` will make events associated with
 modifications of top-level windows accessible to our root window, i.e.
 the second parameter of our call to `XSelectInput`. We can then listen
@@ -237,9 +242,7 @@ the X server most often failed to make it visible before our
 Each workspace must only keep track of its clients, along with its
 active layout configuration and its focus stack. When switching
 between workspaces, we just need to iterate over the active client
-list and unmap (not destroy!) every single frame window. Unmapping is
-recursive, so the underlying windows will immediately become invisible
-as well.
+list and unmap (not destroy!) all stored windows.
 
 ## Floating Windows
 
